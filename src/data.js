@@ -1,96 +1,72 @@
-export const csvData = `従業員名,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
-店長,11-18,14-休,休,休,15-17,休,休,16-18,14-休,15-17,休,14-休,休,休,休
-森,休,休,休,休,休,休,休,休,休,休,休,休,休,休,休
-西村(優),9-L,休,休,休,9-L,12-L,9-L,9-L,休,9-L,休,休,12-16,9-L,9-L
-西村(海),18-L,18-L,休,休,18-L,16-L,休,18-L,休,18-L,休,18-L,16-L,休,16-L
-玉置,休,9-14,9-14,9-14,休,休,休,休,9-14,9-14,9-14,9-14,休,休,休
-河原,休,休,休,休,休,休,11-15,休,休,休,休,休,休,休,休
-杉田,9-14,9-14,休,休,9-14,休,休,9-14,9-14,休,休,9-14,休,休,9-14
-熊澤,休,休,17-L,休,休,17-L,17-L,休,17-L,休,休,休,休,17-L,休
-渡辺,10-L,休,11-L,休,11-L,11-L,11-L,11-16.75,休,11-L,11-L,休,11-16,11-L,11-L
-安部,休,10-14,休,10-14,10-15,休,11-15,休,10-14,休,休,10-14,休,10-15,休
-北川,休,休,10-14,休,休,10-14,10-14,10-14,休,10-14,休,休,10-14,10-14,10-14
-本橋,10-15,休,10-15,休,10-15,休,休,10-15,休,10-14,休,10-14,休,休,10-15
-早川,休,休,休,18-L,休,休,18-L,休,休,休,休,12-L,休,休,休
-小林,休,休,休,休,休,休,休,休,休,休,休,18-L,休,休,休
-関口,休,10-14,休,10-14,休,休,休,休,10-15,休,10-15,11-15,休,休,休
-水本,休,休,休,休,休,休,10-14,休,休,休,10-14,休,10-14,休,休
-蒔野,休,休,休,休,休,休,休,休,休,休,休,18-L,16-L,16-L,休
-浅海,休,18-L,休,18-L,休,12-16,休,18-L,18-L,休,18-L,休,12-15,休,休
-玉川,休,11-16.75,休,11-16.75,休,10-15.75,12-16,休,11-16.75,休,休,休,休,11-16,休`;
+export const initialUsers = [
+  { id: 1, name: '店長', group: '店長', pin: '1111', role: 'manager' },
+  { id: 2, name: '森', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 3, name: '西村(優)', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 4, name: '西村(海)', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 5, name: '玉置', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 6, name: '河原', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 7, name: '杉田', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 8, name: '熊澤', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 9, name: '渡辺', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 10, name: '安部', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 11, name: '北川', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 12, name: '本橋', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 13, name: '早川', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 14, name: '小林', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 15, name: '関口', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 16, name: '水本', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 17, name: '蒔野', group: 'キッチン', pin: '0000', role: 'staff' },
+  { id: 18, name: '浅海', group: 'ホール', pin: '0000', role: 'staff' },
+  { id: 19, name: '玉川', group: 'ホール', pin: '0000', role: 'staff' },
+];
 
-export const parseCSV = (csv) => {
-  const lines = csv.trim().split('\n');
-  const headers = lines[0].split(',');
-  
-  const data = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
-    const row = { name: values[0] };
-    for (let j = 1; j < headers.length; j++) {
-      row[headers[j]] = values[j];
+// シフトデータ: "userId" → { name, shifts: { day: "start-end" or "-" } }
+// 空のセル = "/"、"-" = 不採用、"start-end" = 採用
+function parseOldShift(userId, name, oldShifts) {
+  const shifts = {};
+  for (let day = 1; day <= 15; day++) {
+    const val = oldShifts[day];
+    if (val && val !== '休') {
+      const clean = val.replace('L', '');
+      const parts = clean.split('-');
+      if (parts.length === 2 && parts[1] !== '休') {
+        const end = val.includes('L') ? '22' : parts[1];
+        shifts[day] = `${parts[0]}-${end}`;
+      }
     }
-    data.push(row);
   }
-  
-  return { headers, data };
+  return { name, shifts };
+}
+
+const oldInitial = {
+  '1': { name: '店長', shifts: { 1: '11-18', 2: '14-休', 3: '休', 4: '休', 5: '15-17', 6: '休', 7: '休', 8: '16-18', 9: '14-休', 10: '15-17', 11: '休', 12: '14-休', 13: '休', 14: '休', 15: '休' } },
+  '2': { name: '森', shifts: { 1: '休', 2: '休', 3: '休', 4: '休', 5: '休', 6: '休', 7: '休', 8: '休', 9: '休', 10: '休', 11: '休', 12: '休', 13: '休', 14: '休', 15: '休' } },
+  '3': { name: '西村(優)', shifts: { 1: '9-L', 2: '休', 3: '休', 4: '休', 5: '9-L', 6: '12-L', 7: '9-L', 8: '9-L', 9: '休', 10: '9-L', 11: '休', 12: '休', 13: '12-16', 14: '9-L', 15: '9-L' } },
+  '4': { name: '西村(海)', shifts: { 1: '18-L', 2: '18-L', 3: '休', 4: '休', 5: '18-L', 6: '16-L', 7: '休', 8: '18-L', 9: '休', 10: '18-L', 11: '休', 12: '18-L', 13: '16-L', 14: '休', 15: '16-L' } },
+  '5': { name: '玉置', shifts: { 1: '休', 2: '9-14', 3: '9-14', 4: '9-14', 5: '休', 6: '休', 7: '休', 8: '休', 9: '9-14', 10: '9-14', 11: '9-14', 12: '9-14', 13: '休', 14: '休', 15: '休' } },
+  '6': { name: '河原', shifts: { 1: '休', 2: '休', 3: '休', 4: '休', 5: '休', 6: '休', 7: '11-15', 8: '休', 9: '休', 10: '休', 11: '休', 12: '休', 13: '休', 14: '休', 15: '休' } },
+  '7': { name: '杉田', shifts: { 1: '9-14', 2: '9-14', 3: '休', 4: '休', 5: '9-14', 6: '休', 7: '休', 8: '9-14', 9: '9-14', 10: '休', 11: '休', 12: '9-14', 13: '休', 14: '休', 15: '9-14' } },
+  '8': { name: '熊澤', shifts: { 1: '休', 2: '休', 3: '17-L', 4: '休', 5: '休', 6: '17-L', 7: '17-L', 8: '休', 9: '17-L', 10: '休', 11: '休', 12: '休', 13: '休', 14: '17-L', 15: '休' } },
+  '9': { name: '渡辺', shifts: { 1: '10-L', 2: '休', 3: '11-L', 4: '休', 5: '11-L', 6: '11-L', 7: '11-L', 8: '11-16.75', 9: '休', 10: '11-L', 11: '11-L', 12: '休', 13: '11-16', 14: '11-L', 15: '11-L' } },
+  '10': { name: '安部', shifts: { 1: '休', 2: '10-14', 3: '休', 4: '10-14', 5: '10-15', 6: '休', 7: '11-15', 8: '休', 9: '10-14', 10: '休', 11: '休', 12: '10-14', 13: '休', 14: '10-15', 15: '休' } },
+  '11': { name: '北川', shifts: { 1: '休', 2: '休', 3: '10-14', 4: '休', 5: '休', 6: '10-14', 7: '10-14', 8: '10-14', 9: '休', 10: '10-14', 11: '休', 12: '休', 13: '10-14', 14: '10-14', 15: '10-14' } },
+  '12': { name: '本橋', shifts: { 1: '10-15', 2: '休', 3: '10-15', 4: '休', 5: '10-15', 6: '休', 7: '休', 8: '10-15', 9: '休', 10: '10-14', 11: '休', 12: '10-14', 13: '休', 14: '休', 15: '10-15' } },
+  '13': { name: '早川', shifts: { 1: '休', 2: '休', 3: '休', 4: '18-L', 5: '休', 6: '休', 7: '18-L', 8: '休', 9: '休', 10: '休', 11: '休', 12: '12-L', 13: '休', 14: '休', 15: '休' } },
+  '14': { name: '小林', shifts: { 1: '休', 2: '休', 3: '休', 4: '休', 5: '休', 6: '休', 7: '休', 8: '休', 9: '休', 10: '休', 11: '休', 12: '18-L', 13: '休', 14: '休', 15: '休' } },
+  '15': { name: '関口', shifts: { 1: '休', 2: '10-14', 3: '休', 4: '10-14', 5: '休', 6: '休', 7: '休', 8: '休', 9: '10-15', 10: '休', 11: '10-15', 12: '11-15', 13: '休', 14: '休', 15: '休' } },
+  '16': { name: '水本', shifts: { 1: '休', 2: '休', 3: '休', 4: '休', 5: '休', 6: '休', 7: '10-14', 8: '休', 9: '休', 10: '休', 11: '10-14', 12: '休', 13: '10-14', 14: '休', 15: '休' } },
+  '17': { name: '蒔野', shifts: { 1: '休', 2: '休', 3: '休', 4: '休', 5: '休', 6: '休', 7: '休', 8: '休', 9: '休', 10: '休', 11: '休', 12: '18-L', 13: '16-L', 14: '16-L', 15: '休' } },
+  '18': { name: '浅海', shifts: { 1: '休', 2: '18-L', 3: '休', 4: '18-L', 5: '休', 6: '12-16', 7: '休', 8: '18-L', 9: '18-L', 10: '休', 11: '18-L', 12: '休', 13: '12-15', 14: '休', 15: '休' } },
+  '19': { name: '玉川', shifts: { 1: '休', 2: '11-16.75', 3: '休', 4: '11-16.75', 5: '休', 6: '10-15.75', 7: '12-16', 8: '休', 9: '11-16.75', 10: '休', 11: '休', 12: '休', 13: '休', 14: '11-16', 15: '休' } },
 };
 
-export const calculateHours = (shift) => {
-  if (!shift || shift === '休') return 0;
-  
-  const isLast = shift.includes('L');
-  const cleanShift = shift.replace('L', '');
-  
-  if (!cleanShift.includes('-')) return 0;
-  
-  const [startStr, endStr] = cleanShift.split('-');
-  const start = parseFloat(startStr);
-  
-  let end;
-  if (isLast) {
-    end = 22;
-  } else {
-    end = parseFloat(endStr);
-  }
-  
-  if (isNaN(start) || isNaN(end)) return 0;
-  
-  return end - start;
-};
+export const initialShifts = {};
+Object.entries(oldInitial).forEach(([id, data]) => {
+  initialShifts[id] = parseOldShift(id, data.name, data.shifts);
+});
 
-export const calculateDailyStats = (data, day) => {
-  let totalHours = 0;
-  let staffCount = 0;
-  
-  data.forEach(row => {
-    const shift = row[day];
-    if (shift && shift !== '休') {
-      const hours = calculateHours(shift);
-      totalHours += hours;
-      staffCount++;
-    }
-  });
-  
-  return { totalHours, staffCount };
-};
+export const initialRequests = {};
 
-export const calculateMonthlyStats = (data, headers) => {
-  let totalHours = 0;
-  let totalDays = 0;
-  
-  headers.slice(1).forEach(day => {
-    const { totalHours: dayHours } = calculateDailyStats(data, day);
-    totalHours += dayHours;
-    if (dayHours > 0) totalDays++;
-  });
-  
-  return { totalHours, totalDays };
-};
+export const initialApproved = {};
 
-export const getShiftColor = (shift) => {
-  if (!shift || shift === '休') return 'bg-gray-100 text-gray-400';
-  if (shift.includes('L')) return 'bg-green-100 text-green-800';
-  if (shift.includes('-')) return 'bg-blue-100 text-blue-800';
-  return 'bg-gray-100 text-gray-600';
-};
+export const initialSales = {};
