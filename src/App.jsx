@@ -18,17 +18,50 @@ const save = (key, v) => {
 const groups = ['店長', 'キッチン', 'ホール'];
 const days = Array.from({ length: 15 }, (_, i) => i + 1);
 
-function formatShiftForManager(val) {
-  if (!val || val === '/' || val === '-') return val || '/';
+// ── Helpers for new Excel-like layout ──
+function parseShiftForNewLayout(val) {
+  if (!val || val === '/' || val === '-') return null;
   const parts = val.split('-');
-  if (parts.length !== 2) return val;
+  if (parts.length !== 2) return null;
   const s = parseFloat(parts[0]);
-  const e = (parts[1] === 'L' || parts[1] === '22') ? 22 : parseFloat(parts[1]);
-  if (isNaN(s) || isNaN(e)) return val;
-  if (e <= 16) return `L${s}〜${e}`;
-  if (s >= 16) return `D${s}〜${e}`;
-  return `L${s}〜15 D16〜${e}`;
+  const e = parts[1] === 'L' ? 22 : parseFloat(parts[1]);
+  if (isNaN(s) || isNaN(e)) return null;
+  if (e <= 16) return { Ls: s, Le: e, Ds: null, De: null };
+  if (s >= 16) return { Ls: null, Le: null, Ds: s, De: e };
+  return { Ls: s, Le: 15, Ds: 16, De: e };
 }
+
+function parseManagerShift(val) {
+  if (!val || val === '/' || val === '-') return null;
+  const parts = val.split('-');
+  if (parts.length !== 2) return null;
+  return { start: parts[0], end: parts[1] === 'L' ? '22' : parts[1] };
+}
+
+function getKohoCount(userId, targetDay, shifts, daysList) {
+  const userShifts = shifts[userId]?.shifts || {};
+  let count = 0;
+  for (const d of daysList) {
+    if (d >= targetDay) break;
+    const v = userShifts[d];
+    if (!v || v === '/' || v === '-') count++;
+  }
+  return count + 1;
+}
+
+function getDayOfWeek(day) {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), day).getDay();
+}
+
+function sumDays(daysList, fn) {
+  let s = 0;
+  for (const d of daysList) s += fn(d) || 0;
+  return s;
+}
+
+const WEEK1 = days.slice(0, 7);
+const WEEK2 = days.slice(7);
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -374,7 +407,6 @@ function App() {
             getDailyStats={getDailyStats}
             getDaySalesData={getDaySalesData}
             handleCellClick={handleCellClick}
-            formatShiftForManager={formatShiftForManager}
             kitchenUsers={kitchenUsers}
             hallUsers={hallUsers}
             seimen={seimen}
@@ -513,14 +545,18 @@ function App() {
             users={users}
             isManager={isManager}
             shifts={shifts}
-            formatShiftForManager={formatShiftForManager}
             kitchenUsers={kitchenUsers}
             hallUsers={hallUsers}
             seimen={seimen}
+            setSeimen={setSeimen}
             shortageAM={shortageAM}
+            setShortageAM={setShortageAM}
             shortagePM={shortagePM}
+            setShortagePM={setShortagePM}
             salesLunch={salesLunch}
+            setSalesLunch={setSalesLunch}
             salesDinner={salesDinner}
+            setSalesDinner={setSalesDinner}
           />
         )}
       </main>
@@ -580,7 +616,7 @@ function App() {
 // ── シフト表コンポーネント ──
 function ShiftTableView({
   users, shifts, days, viewMode, isManager, sales,
-  getDailyStats, getDaySalesData, handleCellClick, formatShiftForManager,
+  getDailyStats, getDaySalesData, handleCellClick,
   kitchenUsers, hallUsers,
   seimen, setSeimen,
   shortageAM, setShortageAM,
@@ -590,257 +626,189 @@ function ShiftTableView({
 }) {
   const showManagerFormat = viewMode === 'manager';
   const allStaff = users.filter(u => u.role !== 'manager');
-
-  // 店長
   const managerUser = users.find(u => u.role === 'manager');
 
+  const dayInfo = days.map(d => ({ d, dow: getDayOfWeek(d) }));
+  const w1 = days.slice(0, 7), w2 = days.slice(7);
+
+  // ── Employee mode (old compact style) ──
+  if (!showManagerFormat) {
+    return (
+      <div className="bg-white border border-gray-300 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="sticky left-0 z-10 bg-gray-50 px-1.5 py-1 text-left text-[9px] font-medium text-gray-500 border border-gray-300 min-w-[75px]">氏名</th>
+                {days.map(d => <th key={d} className="px-1 py-1 text-center text-[9px] font-medium text-gray-500 border border-gray-300 w-[52px]">{d}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {managerUser && <StaffRowOld user={managerUser} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} />}
+              <tr><td colSpan={days.length + 1} className="px-1.5 py-0.5 text-[9px] font-bold text-gray-500 bg-gray-100 border border-gray-300">キッチン</td></tr>
+              {kitchenUsers.map(u => <StaffRowOld key={u.id} user={u} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} />)}
+
+              {/* 製麺 + 不足 + 売上行 (employee view, inline) */}
+              <tr className="bg-indigo-50">
+                <td className="sticky left-0 z-10 px-1.5 py-1 text-[9px] font-bold text-indigo-700 border border-gray-300 bg-indigo-50 whitespace-nowrap">🍜 製麺</td>
+                {days.map(d => {
+                  const val = seimen[d] || '';
+                  return <td key={d} className="px-0.5 py-0.5 text-center border border-gray-300 bg-indigo-50">
+                    {isManager ? (
+                      <select value={val} onChange={e => setSeimen({ ...seimen, [d]: e.target.value })} className="w-full text-[9px] px-0.5 py-0.5 border border-gray-300 rounded bg-white">
+                        <option value="">-</option>
+                        {allStaff.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
+                      </select>
+                    ) : <span className="text-[9px] font-bold text-indigo-700">{val || '/'}</span>}
+                  </td>;
+                })}
+              </tr>
+              <tr className="bg-red-50">
+                <td className="sticky left-0 z-10 px-1.5 py-1 text-[9px] font-bold text-red-700 border border-gray-300 bg-red-50 whitespace-nowrap">☀ 午前不足</td>
+                {days.map(d => {
+                  const val = shortageAM[d];
+                  return <td key={d} className="px-0.5 py-0.5 text-center border border-gray-300 bg-red-50">
+                    {isManager ? <input type="number" value={val ?? ''} onChange={e => setShortageAM({ ...shortageAM, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })} className="w-full text-[9px] px-0.5 py-0.5 border border-gray-300 rounded bg-white text-center font-bold" />
+                    : <span className="text-[9px] font-bold text-red-600">{val != null ? val : '-'}</span>}
+                  </td>;
+                })}
+              </tr>
+              <tr className="bg-orange-50">
+                <td className="sticky left-0 z-10 px-1.5 py-1 text-[9px] font-bold text-orange-700 border border-gray-300 bg-orange-50 whitespace-nowrap">🌅 午後不足</td>
+                {days.map(d => {
+                  const val = shortagePM[d];
+                  return <td key={d} className="px-0.5 py-0.5 text-center border border-gray-300 bg-orange-50">
+                    {isManager ? <input type="number" value={val ?? ''} onChange={e => setShortagePM({ ...shortagePM, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })} className="w-full text-[9px] px-0.5 py-0.5 border border-gray-300 rounded bg-white text-center font-bold" />
+                    : <span className="text-[9px] font-bold text-orange-600">{val != null ? val : '-'}</span>}
+                  </td>;
+                })}
+              </tr>
+
+              <tr><td colSpan={days.length + 1} className="px-1.5 py-0.5 text-[9px] font-bold text-gray-500 bg-gray-100 border border-gray-300">ホール</td></tr>
+              {hallUsers.map(u => <StaffRowOld key={u.id} user={u} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} />)}
+
+              {/* 売上 rows */}
+              <tr className="bg-cyan-50">
+                <td className="sticky left-0 z-10 px-1.5 py-1 text-[9px] font-bold text-cyan-700 border border-gray-300 bg-cyan-50 whitespace-nowrap">💰 売上 昼</td>
+                {days.map(d => {
+                  const v = salesLunch[d] || { main: '', sub: '' };
+                  return <td key={d} className="px-0.5 py-0.5 text-center border border-gray-300 bg-cyan-50">
+                    {isManager ? <div className="flex flex-col items-center gap-0"><input type="number" value={v.main} onChange={e => setSalesLunch({ ...salesLunch, [d]: { ...v, main: e.target.value } })} className="w-full text-[9px] px-0.5 py-0 border border-gray-300 rounded bg-white text-center font-medium" placeholder="予測" /><input type="number" value={v.sub} onChange={e => setSalesLunch({ ...salesLunch, [d]: { ...v, sub: e.target.value } })} className="w-full text-[8px] px-0.5 py-0 border border-gray-300 rounded bg-white text-center text-gray-500" placeholder="(実績)" /></div>
+                    : <span className="text-[9px] font-medium text-cyan-700">{v.main || '-'}{v.sub ? ` (${v.sub})` : ''}</span>}
+                  </td>;
+                })}
+              </tr>
+              <tr className="bg-blue-50">
+                <td className="sticky left-0 z-10 px-1.5 py-1 text-[9px] font-bold text-blue-700 border border-gray-300 bg-blue-50 whitespace-nowrap">🌙 売上 ディナー</td>
+                {days.map(d => {
+                  const v = salesDinner[d] || { main: '', sub: '' };
+                  return <td key={d} className="px-0.5 py-0.5 text-center border border-gray-300 bg-blue-50">
+                    {isManager ? <div className="flex flex-col items-center gap-0"><input type="number" value={v.main} onChange={e => setSalesDinner({ ...salesDinner, [d]: { ...v, main: e.target.value } })} className="w-full text-[9px] px-0.5 py-0 border border-gray-300 rounded bg-white text-center font-medium" placeholder="予測" /><input type="number" value={v.sub} onChange={e => setSalesDinner({ ...salesDinner, [d]: { ...v, sub: e.target.value } })} className="w-full text-[8px] px-0.5 py-0 border border-gray-300 rounded bg-white text-center text-gray-500" placeholder="(実績)" /></div>
+                    : <span className="text-[9px] font-medium text-blue-700">{v.main || '-'}{v.sub ? ` (${v.sub})` : ''}</span>}
+                  </td>;
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="px-2 py-1 border-t border-gray-300 text-[9px] text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
+          <span><span className="text-gray-300 font-light">/</span> = 未提出</span>
+          <span><span className="text-red-400 font-bold">-</span> = 不採用</span>
+          <span><span className="text-blue-600 font-bold">09─22</span> = 採用</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Manager mode: Excel-like layout ──
+  const totalCols = 1 + days.length + 1 + 6;
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-      <div className="overflow-x-auto pb-2">
-        <table className="w-full border-collapse min-w-[700px]">
+    <div className="bg-white border border-gray-300 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse" style={{ fontSize: '10px' }}>
           <thead>
-            {showManagerFormat && (
-              <>
-                <tr className="bg-gray-50">
-                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200 min-w-[80px]">売上予測</th>
-                  {days.map(d => {
-                    const { sales: s } = getDaySalesData(d);
-                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200 w-[68px]">{s > 0 ? `¥${(s / 1000).toFixed(0)}k` : '-'}</th>;
-                  })}
-                </tr>
-                <tr className="bg-gray-50">
-                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200">Ap時間計</th>
-                  {days.map(d => {
-                    const { apHours } = getDaySalesData(d);
-                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200">{apHours.toFixed(1)}</th>;
-                  })}
-                </tr>
-                <tr className="bg-gray-50">
-                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200">人時売上</th>
-                  {days.map(d => {
-                    const { laborSalesRatio } = getDaySalesData(d);
-                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200">{laborSalesRatio > 0 ? `¥${laborSalesRatio.toFixed(0)}` : '-'}</th>;
-                  })}
-                </tr>
-              </>
-            )}
+            {/* Header row: day numbers + DOW + 前半合計 + green weekly sub-headers */}
             <tr className="bg-gray-50">
-              <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase border-b border-r border-gray-200 min-w-[80px]">氏名</th>
-              {days.map(d => (
-                <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[68px]">{d}</th>
-              ))}
+              <th rowSpan={2} className="sticky left-0 z-10 bg-gray-50 px-1.5 py-0.5 text-left font-medium text-gray-500 border border-gray-300 min-w-[75px]">氏名</th>
+              {dayInfo.map(({ d, dow }) => {
+                const bg = dow === 0 ? 'bg-red-100' : dow === 6 ? 'bg-blue-100' : 'bg-green-100';
+                return <th key={d} className={`px-0.5 py-0.5 text-center font-medium text-gray-700 border border-gray-300 ${bg} w-[52px]`}>
+                  <div className="text-[9px]">{d}</div>
+                  <div className={`text-[8px] ${dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-green-700'}`}>{['日','月','火','水','木','金','土'][dow]}</div>
+                </th>;
+              })}
+              <th rowSpan={2} className="px-1 py-0.5 text-center font-medium text-gray-500 border border-gray-300 w-[52px]">前半<br/>合計</th>
+              <th colSpan={3} className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300 w-[55px]">第1週</th>
+              <th colSpan={3} className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300 w-[55px]">第2週</th>
+            </tr>
+            <tr className="bg-green-50">
+              {['売上','時間','人時'].map(h => <th key={h} className="px-0.5 py-0.5 text-center font-medium text-green-700 bg-green-100 border border-gray-300 text-[8px] w-[55px]">{h}</th>)}
+              {['売上','時間','人時'].map(h => <th key={h} className="px-0.5 py-0.5 text-center font-medium text-green-700 bg-green-100 border border-gray-300 text-[8px] w-[55px]">{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {/* ── 店長行 ── */}
-            {managerUser && <StaffRow user={managerUser} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} formatShiftForManager={formatShiftForManager} showManagerFormat={showManagerFormat} />}
+            {/* ── KPI rows ── */}
+            <KpiRow label="売上予測(千円)" days={days} w1={w1} w2={w2} fn={d => (sales[d]?.current || 0) / 1000} getDailyStats={getDailyStats} />
+            <KpiRow label="前年売上" days={days} w1={w1} w2={w2} fn={d => sales[d]?.prevYear || 0} getDailyStats={getDailyStats} />
+            <KpiRow label="前年比(%)" days={days} w1={w1} w2={w2} fn={d => { const p = sales[d]?.prevYear; const c = sales[d]?.current; return (p && p > 0) ? ((c - p) / p * 100).toFixed(1) : '-'; }} getDailyStats={getDailyStats} isRatio />
+            <KpiRow label="前年ﾗﾝﾁ売上" days={days} w1={w1} w2={w2} fn={d => sales[d]?.prevYearLunch || 0} getDailyStats={getDailyStats} />
+            <KpiRow label="前年ﾃﾞｨﾅｰ売上" days={days} w1={w1} w2={w2} fn={d => sales[d]?.prevYearDinner || 0} getDailyStats={getDailyStats} />
 
-            {/* ── キッチングループ ── */}
-            <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">キッチン</td></tr>
-            {kitchenUsers.map(u => (
-              <StaffRow key={u.id} user={u} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} formatShiftForManager={formatShiftForManager} showManagerFormat={showManagerFormat} />
-            ))}
+            {/* ── Staff section ── */}
+            <tr><td colSpan={totalCols} className="px-1.5 py-0.5 font-bold text-gray-500 bg-gray-100 border border-gray-300">スタッフ</td></tr>
 
-            {/* ── 製麺行 ── */}
-            <tr className="bg-indigo-50">
-              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-indigo-700 border-b border-r border-gray-200 whitespace-nowrap bg-indigo-50">
-                🍜 製麺
-              </td>
-              {days.map(d => {
-                const val = seimen[d] || '';
-                return (
-                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
-                    {isManager ? (
-                      <select
-                        value={val}
-                        onChange={e => setSeimen({ ...seimen, [d]: e.target.value })}
-                        className="w-full text-[10px] px-1 py-1 border border-indigo-300 rounded bg-white"
-                      >
-                        <option value="">-</option>
-                        {allStaff.map(u => (
-                          <option key={u.id} value={u.name}>{u.name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="text-xs font-medium text-indigo-700">{val || '/'}</span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+            {/* Manager: 2 rows (出/退) */}
+            {managerUser && <StaffPair user={managerUser} shifts={shifts} days={days} dayInfo={dayInfo} isManager={isManager} handleCellClick={handleCellClick} isManagerUser />}
 
-            {/* ── 午前不足 ── */}
-            <tr className="bg-red-50">
-              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-red-700 border-b border-r border-gray-200 whitespace-nowrap bg-red-50">
-                ☀ 午前不足
-              </td>
-              {days.map(d => {
-                const val = shortageAM[d];
-                return (
-                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
-                    {isManager ? (
-                      <input
-                        type="number"
-                        value={val ?? ''}
-                        onChange={e => setShortageAM({ ...shortageAM, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })}
-                        className="w-full text-[11px] px-1 py-1 border border-red-300 rounded bg-red-50 text-red-700 text-center font-bold"
-                        placeholder="0"
-                      />
-                    ) : (
-                      <span className="text-xs font-bold text-red-600">{val != null ? val : '-'}</span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+            <tr><td colSpan={totalCols} className="px-1.5 py-0.5 font-bold text-gray-500 bg-gray-100 border border-gray-300">キッチン</td></tr>
+            {kitchenUsers.map(u => <StaffPair key={u.id} user={u} shifts={shifts} days={days} dayInfo={dayInfo} isManager={isManager} handleCellClick={handleCellClick} />)}
 
-            {/* ── 午後不足 ── */}
-            <tr className="bg-orange-50">
-              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-orange-700 border-b border-r border-gray-200 whitespace-nowrap bg-orange-50">
-                🌅 午後不足
-              </td>
-              {days.map(d => {
-                const val = shortagePM[d];
-                return (
-                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
-                    {isManager ? (
-                      <input
-                        type="number"
-                        value={val ?? ''}
-                        onChange={e => setShortagePM({ ...shortagePM, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })}
-                        className="w-full text-[11px] px-1 py-1 border border-orange-300 rounded bg-orange-50 text-orange-700 text-center font-bold"
-                        placeholder="0"
-                      />
-                    ) : (
-                      <span className="text-xs font-bold text-orange-600">{val != null ? val : '-'}</span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+            {/* 製麺 + 不足 rows (span 2 rows height equivalent) */}
+            <SpecialRow label="🍜 製麺" days={days} data={seimen} setData={setSeimen} isManager={isManager} allStaff={allStaff} cellType="select" />
+            <SpecialRow label="☀ 午前不足" days={days} data={shortageAM} setData={setShortageAM} isManager={isManager} cellType="number" bg="bg-red-50" color="text-red-700" />
+            <SpecialRow label="🌅 午後不足" days={days} data={shortagePM} setData={setShortagePM} isManager={isManager} cellType="number" bg="bg-orange-50" color="text-orange-700" />
 
-            {/* ── ホールグループ ── */}
-            <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">ホール</td></tr>
-            {hallUsers.map(u => (
-              <StaffRow key={u.id} user={u} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} formatShiftForManager={formatShiftForManager} showManagerFormat={showManagerFormat} />
-            ))}
+            <tr><td colSpan={totalCols} className="px-1.5 py-0.5 font-bold text-gray-500 bg-gray-100 border border-gray-300">ホール</td></tr>
+            {hallUsers.map(u => <StaffPair key={u.id} user={u} shifts={shifts} days={days} dayInfo={dayInfo} isManager={isManager} handleCellClick={handleCellClick} />)}
 
-            {/* ── 売上 昼 ── */}
-            <tr className="bg-cyan-50">
-              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-cyan-700 border-b border-r border-gray-200 whitespace-nowrap bg-cyan-50">
-                💰 売上 昼
-              </td>
-              {days.map(d => {
-                const val = salesLunch[d] || { main: '', sub: '' };
-                return (
-                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
-                    {isManager ? (
-                      <div className="flex flex-col items-center gap-0.5">
-                        <input
-                          type="number"
-                          value={val.main}
-                          onChange={e => setSalesLunch({ ...salesLunch, [d]: { ...val, main: e.target.value } })}
-                          className="w-full text-[10px] px-1 py-0.5 border border-cyan-300 rounded bg-white text-center font-medium"
-                          placeholder="予測"
-                        />
-                        <input
-                          type="number"
-                          value={val.sub}
-                          onChange={e => setSalesLunch({ ...salesLunch, [d]: { ...val, sub: e.target.value } })}
-                          className="w-full text-[10px] px-1 py-0.5 border border-cyan-300 rounded bg-white text-center text-gray-500"
-                          placeholder="(実績)"
-                        />
-                      </div>
-                    ) : (
-                      <span className="text-xs font-medium text-cyan-700">
-                        {val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}
-                      </span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-
-            {/* ── 売上 ディナー ── */}
-            <tr className="bg-blue-50">
-              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-blue-700 border-b border-r border-gray-200 whitespace-nowrap bg-blue-50">
-                🌙 売上 ディナー
-              </td>
-              {days.map(d => {
-                const val = salesDinner[d] || { main: '', sub: '' };
-                return (
-                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
-                    {isManager ? (
-                      <div className="flex flex-col items-center gap-0.5">
-                        <input
-                          type="number"
-                          value={val.main}
-                          onChange={e => setSalesDinner({ ...salesDinner, [d]: { ...val, main: e.target.value } })}
-                          className="w-full text-[10px] px-1 py-0.5 border border-blue-300 rounded bg-white text-center font-medium"
-                          placeholder="予測"
-                        />
-                        <input
-                          type="number"
-                          value={val.sub}
-                          onChange={e => setSalesDinner({ ...salesDinner, [d]: { ...val, sub: e.target.value } })}
-                          className="w-full text-[10px] px-1 py-0.5 border border-blue-300 rounded bg-white text-center text-gray-500"
-                          placeholder="(実績)"
-                        />
-                      </div>
-                    ) : (
-                      <span className="text-xs font-medium text-blue-700">
-                        {val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}
-                      </span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
+            <SalesRow label="💰 売上 昼" days={days} data={salesLunch} setData={setSalesLunch} isManager={isManager} bg="bg-cyan-50" color="text-cyan-700" />
+            <SalesRow label="🌙 売上 ディナー" days={days} data={salesDinner} setData={setSalesDinner} isManager={isManager} bg="bg-blue-50" color="text-blue-700" />
           </tbody>
         </table>
       </div>
-      <div className="px-3 py-2 border-t border-gray-200 text-[10px] text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
-        <span><span className="text-gray-300 text-sm font-light">/</span> = 未提出</span>
+      <div className="px-2 py-1 border-t border-gray-300 text-[9px] text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
+        <span><span className="text-gray-300 font-light">/</span> = 未提出</span>
         <span><span className="text-red-400 font-bold">-</span> = 不採用</span>
         <span><span className="text-blue-600 font-bold">09─22</span> = 採用</span>
-        {showManagerFormat && <span className="text-green-700">L=ランチ D=ディナー</span>}
       </div>
     </div>
   );
 }
 
-// ── スタッフ1行 ──
-function StaffRow({ user, shifts, days, isManager, handleCellClick, formatShiftForManager, showManagerFormat }) {
+// ── StaffRowOld: single row for employee mode ──
+function StaffRowOld({ user, shifts, days, isManager, handleCellClick }) {
   const userShifts = shifts[user.id]?.shifts || {};
   return (
-    <tr className="bg-white border-b border-gray-100">
-      <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 whitespace-nowrap bg-white">
-        {user.name}
-        <span className="ml-1 text-[9px] text-gray-400">({user.group === '店長' ? '' : user.group === 'キッチン' ? 'K' : 'H'})</span>
-      </td>
+    <tr className="bg-white">
+      <td className="sticky left-0 z-10 px-1.5 py-1 text-[10px] font-medium text-gray-700 border border-gray-300 bg-white whitespace-nowrap">{user.name}</td>
       {days.map(d => {
         const val = userShifts[d];
         const isEmpty = !val || val === '/';
         const isRejected = val === '-';
         return (
-          <td
-            key={d}
-            onClick={() => isManager && handleCellClick(user.id, d)}
-            className={`px-0 py-0 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'} ${isManager ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
-            style={{ height: '32px' }}
+          <td key={d} onClick={() => isManager && handleCellClick(user.id, d)}
+            className={`px-0 py-0 text-center border border-gray-300 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'} ${isManager ? 'cursor-pointer hover:bg-blue-100' : ''}`}
+            style={{ height: '28px' }}
           >
-            {isEmpty && <span className="text-gray-300 text-sm font-light leading-none">/</span>}
-            {isRejected && <span className="text-red-400 text-sm font-bold leading-none">-</span>}
+            {isEmpty && <span className="text-gray-300 font-light leading-none">/</span>}
+            {isRejected && <span className="text-red-400 font-bold leading-none">-</span>}
             {!isEmpty && !isRejected && (
-              showManagerFormat ? (
-                <span className="text-[9px] font-medium text-gray-700 leading-tight">{formatShiftForManager(val)}</span>
-              ) : (
-                <div className="flex flex-col items-center leading-tight py-0.5">
-                  <span className="text-[11px] font-bold text-gray-800">{val.split('-')[0]}</span>
-                  <span className="text-[8px] text-gray-400 leading-[10px]">─</span>
-                  <span className="text-[11px] font-bold text-gray-800">{val.split('-')[1]}</span>
-                </div>
-              )
+              <div className="flex flex-col items-center leading-tight py-0.5">
+                <span className="text-[10px] font-bold text-gray-800">{val.split('-')[0]}</span>
+                <span className="text-[7px] text-gray-400 leading-[8px]">─</span>
+                <span className="text-[10px] font-bold text-gray-800">{val.split('-')[1]}</span>
+              </div>
             )}
           </td>
         );
@@ -849,57 +817,298 @@ function StaffRow({ user, shifts, days, isManager, handleCellClick, formatShiftF
   );
 }
 
+// ── KpiRow: one metric row in manager view ──
+function KpiRow({ label, days, w1, w2, fn, getDailyStats, isRatio }) {
+  const sumW1 = w1.reduce((a, d) => { const v = fn(d); return a + (typeof v === 'number' ? v : 0); }, 0);
+  const sumW2 = w2.reduce((a, d) => { const v = fn(d); return a + (typeof v === 'number' ? v : 0); }, 0);
+  const total = sumW1 + sumW2;
+  const w1Hours = w1.reduce((a, d) => a + (getDailyStats?.(d)?.totalHours || 0), 0) || 1;
+  const w2Hours = w2.reduce((a, d) => a + (getDailyStats?.(d)?.totalHours || 0), 0) || 1;
+  const w1Ratio = sumW1 / w1Hours;
+  const w2Ratio = sumW2 / w2Hours;
+
+  return (
+    <tr className="bg-gray-50">
+      <td className="sticky left-0 z-10 px-1.5 py-0.5 text-[9px] font-medium text-gray-500 border border-gray-300 bg-gray-50 whitespace-nowrap">{label}</td>
+      {days.map(d => {
+        const v = fn(d);
+        return <td key={d} className={`px-0.5 py-0.5 text-center border border-gray-300 ${isRatio && typeof v === 'number' ? (v >= 0 ? 'text-green-700' : 'text-red-600') : 'text-gray-700'} font-medium`}>{v === 0 ? '0' : (v || '-')}</td>;
+      })}
+      <td className="px-0.5 py-0.5 text-center font-bold text-gray-700 border border-gray-300 bg-gray-100">{total.toFixed ? total.toFixed(0) : total}</td>
+      {isRatio ? (
+        <>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">{sumW1.toFixed(0)}</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">-</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">-</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">{sumW2.toFixed(0)}</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">-</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">-</td>
+        </>
+      ) : (
+        <>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">{typeof sumW1 === 'number' ? sumW1.toFixed(1) : '-'}</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">-</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">{w1Ratio > 0 ? w1Ratio.toFixed(0) : '-'}</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">{typeof sumW2 === 'number' ? sumW2.toFixed(1) : '-'}</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">-</td>
+          <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300">{w2Ratio > 0 ? w2Ratio.toFixed(0) : '-'}</td>
+        </>
+      )}
+    </tr>
+  );
+}
+
+// ── StaffPair: 2 rows (L/D or 出/退) for one staff member ──
+function StaffPair({ user, shifts, days, dayInfo, isManager, handleCellClick, isManagerUser }) {
+  const userShifts = shifts[user.id]?.shifts || {};
+  const w1 = days.slice(0, 7), w2 = days.slice(7);
+
+  const calcWeeklyHours = (weekDays) => {
+    let total = 0;
+    for (const d of weekDays) {
+      const val = userShifts[d];
+      if (!val || val === '/' || val === '-') continue;
+      const parsed = isManagerUser ? parseManagerShift(val) : parseShiftForNewLayout(val);
+      if (!parsed) continue;
+      if (isManagerUser) {
+        total += parseFloat(parsed.end) - parseFloat(parsed.start);
+      } else {
+        if (parsed.Ls != null) total += parsed.Le - parsed.Ls;
+        if (parsed.Ds != null) total += parsed.De - parsed.Ds;
+      }
+    }
+    return total;
+  };
+
+  const totalHours = calcWeeklyHours(days);
+  const w1Hours = calcWeeklyHours(w1);
+  const w2Hours = calcWeeklyHours(w2);
+
+  const labelTop = isManagerUser ? '出' : 'L';
+  const labelBot = isManagerUser ? '退' : 'D';
+
+  const renderCell = (d, isTop) => {
+    const val = userShifts[d];
+    const isEmpty = !val || val === '/';
+    const isRejected = val === '-';
+
+    if (isEmpty || isRejected) {
+      if (isManagerUser && isEmpty) {
+        const n = getKohoCount(user.id, d, shifts, days);
+        const circled = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][n - 1] || `⑩`;
+        return <span className="text-[8px] font-bold text-gray-500">公休{circled}</span>;
+      }
+      if (isTop) return <span className="text-gray-300 font-light">/</span>;
+      return null;
+    }
+
+    if (isManagerUser) {
+      const parsed = parseManagerShift(val);
+      if (!parsed) return <span className="text-gray-300 font-light">/</span>;
+      return <span className="text-[10px] font-bold text-gray-800">{isTop ? parsed.start : parsed.end}</span>;
+    }
+
+    // Part-timer
+    const parsed = parseShiftForNewLayout(val);
+    if (!parsed) return <span className="text-gray-300 font-light">/</span>;
+    if (isTop) {
+      if (parsed.Ls == null) return null;
+      return <div className="flex justify-between px-0.5 text-[9px] font-bold text-gray-800"><span>{parsed.Ls}</span><span>{parsed.Le}</span></div>;
+    }
+    // Bottom (D)
+    if (parsed.Ds == null) return null;
+    return <div className="flex justify-between px-0.5 text-[9px] font-bold text-gray-800"><span>{parsed.Ds}</span><span>{parsed.De}</span></div>;
+  };
+
+  const cellClass = (d, isEmpty, isRejected) =>
+    `px-0 py-0 text-center border border-gray-300 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'} ${isManager ? 'cursor-pointer hover:bg-blue-100' : ''}`;
+
+  return (
+    <>
+      {/* Top row (出/L) */}
+      <tr className="bg-white">
+        <td className="sticky left-0 z-10 px-1.5 py-0.5 text-[9px] font-medium text-gray-700 border border-gray-300 bg-white whitespace-nowrap">
+          {labelTop} {user.name}
+        </td>
+        {days.map(d => {
+          const val = userShifts[d];
+          const isEmpty = !val || val === '/';
+          const isRej = val === '-';
+          return (
+            <td key={`${d}-t`} onClick={() => isManager && handleCellClick(user.id, d)} className={cellClass(d, isEmpty, isRej)} style={{ height: '22px' }}>
+              {renderCell(d, true)}
+            </td>
+          );
+        })}
+        <td className="px-0.5 py-0.5 text-center font-bold text-gray-700 border border-gray-300 bg-gray-100">{totalHours.toFixed(1)}</td>
+        <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w1Hours.toFixed(1)}</td>
+        <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w2Hours.toFixed(1)}</td>
+      </tr>
+      {/* Bottom row (退/D) */}
+      <tr className="bg-white">
+        <td className="sticky left-0 z-10 px-1.5 py-0.5 text-[9px] text-gray-500 border border-gray-300 bg-white whitespace-nowrap">{labelBot}</td>
+        {days.map(d => {
+          const val = userShifts[d];
+          const isEmpty = !val || val === '/';
+          const isRej = val === '-';
+          return (
+            <td key={`${d}-b`} onClick={() => isManager && handleCellClick(user.id, d)} className={cellClass(d, isEmpty, isRej)} style={{ height: '22px' }}>
+              {renderCell(d, false)}
+            </td>
+          );
+        })}
+        <td className="px-0.5 py-0.5 border border-gray-300 bg-gray-50" />
+        <td className="px-0.5 py-0.5 border border-gray-300 bg-green-100" colSpan={3} />
+        <td className="px-0.5 py-0.5 border border-gray-300 bg-green-100" colSpan={3} />
+      </tr>
+    </>
+  );
+}
+
+// ── SpecialRow: 製麺 / 午前不足 / 午後不足 ──
+function SpecialRow({ label, days, data, setData, isManager, allStaff, cellType, bg = '', color = '' }) {
+  const w1 = days.slice(0, 7), w2 = days.slice(7);
+  const sumFn = d => { const v = data[d]; return v != null && v !== '' ? (parseInt(v) || 0) : 0; };
+  const total = days.reduce((a, d) => a + sumFn(d), 0);
+  const w1Total = w1.reduce((a, d) => a + sumFn(d), 0);
+  const w2Total = w2.reduce((a, d) => a + sumFn(d), 0);
+
+  return (
+    <tr className={bg || 'bg-indigo-50'}>
+      <td className={`sticky left-0 z-10 px-1.5 py-0.5 text-[9px] font-bold border border-gray-300 whitespace-nowrap ${color || 'text-indigo-700'} ${bg || 'bg-indigo-50'}`}>{label}</td>
+      {days.map(d => {
+        const val = data[d];
+        return (
+          <td key={d} className={`px-0.5 py-0.5 text-center border border-gray-300 ${bg || 'bg-indigo-50'}`}>
+            {isManager ? (
+              cellType === 'select' ? (
+                <select value={val || ''} onChange={e => setData({ ...data, [d]: e.target.value })}
+                  className="w-full text-[9px] px-0.5 py-0.5 border border-gray-300 rounded bg-white">
+                  <option value="">-</option>
+                  {allStaff.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
+                </select>
+              ) : (
+                <input type="number" value={val ?? ''} onChange={e => setData({ ...data, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })}
+                  className="w-full text-[9px] px-0.5 py-0.5 border border-gray-300 rounded bg-white text-center font-bold" />
+              )
+            ) : (
+              <span className={`text-[9px] font-bold ${color || 'text-indigo-700'}`}>{val != null && val !== '' ? val : '/'}</span>
+            )}
+          </td>
+        );
+      })}
+      <td className={`px-0.5 py-0.5 text-center font-bold text-gray-700 border border-gray-300 bg-gray-100`}>{total || '-'}</td>
+      <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w1Total || '-'}</td>
+      <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w2Total || '-'}</td>
+    </tr>
+  );
+}
+
+// ── SalesRow: 売上 昼 / 売上 ディナー ──
+function SalesRow({ label, days, data, setData, isManager, bg, color }) {
+  const w1 = days.slice(0, 7), w2 = days.slice(7);
+  const sumFn = d => { const v = data[d]; return v?.main ? parseInt(v.main) || 0 : 0; };
+  const total = days.reduce((a, d) => a + sumFn(d), 0);
+  const w1Total = w1.reduce((a, d) => a + sumFn(d), 0);
+  const w2Total = w2.reduce((a, d) => a + sumFn(d), 0);
+
+  return (
+    <tr className={bg}>
+      <td className={`sticky left-0 z-10 px-1.5 py-0.5 text-[9px] font-bold border border-gray-300 whitespace-nowrap ${color} ${bg}`}>{label}</td>
+      {days.map(d => {
+        const v = data[d] || { main: '', sub: '' };
+        return (
+          <td key={d} className={`px-0.5 py-0.5 text-center border border-gray-300 ${bg}`}>
+            {isManager ? (
+              <div className="flex flex-col items-center gap-0">
+                <input type="number" value={v.main} onChange={e => setData({ ...data, [d]: { ...v, main: e.target.value } })}
+                  className="w-full text-[9px] px-0.5 py-0 border border-gray-300 rounded bg-white text-center font-medium" placeholder="予測" />
+                <input type="number" value={v.sub} onChange={e => setData({ ...data, [d]: { ...v, sub: e.target.value } })}
+                  className="w-full text-[8px] px-0.5 py-0 border border-gray-300 rounded bg-white text-center text-gray-500" placeholder="(実績)" />
+              </div>
+            ) : (
+              <span className="text-[9px] font-medium">{v.main || '-'}{v.sub ? ` (${v.sub})` : ''}</span>
+            )}
+          </td>
+        );
+      })}
+      <td className={`px-0.5 py-0.5 text-center font-bold text-gray-700 border border-gray-300 bg-gray-100`}>{total || '-'}</td>
+      <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w1Total || '-'}</td>
+      <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w2Total || '-'}</td>
+    </tr>
+  );
+}
+
 // ── 売上管理 ──
 function SalesView({
   days, sales, setSales, editingSales, setEditingSales, handleSaveSales,
   monthlyStats, getManagerBreakHours, getMonthlyStats, users, isManager,
-  shifts, formatShiftForManager, kitchenUsers, hallUsers,
-  seimen, shortageAM, shortagePM, salesLunch, salesDinner
+  shifts, kitchenUsers, hallUsers,
+  seimen, shortageAM, shortagePM, salesLunch, salesDinner,
+  setSeimen, setShortageAM, setShortagePM, setSalesLunch, setSalesDinner,
 }) {
   const managerUser = users.find(u => u.role === 'manager');
   const allStaff = users.filter(u => u.role !== 'manager');
+  const dayInfo = days.map(d => ({ d, dow: getDayOfWeek(d) }));
+  const w1 = days.slice(0, 7), w2 = days.slice(7);
+  const totalCols = 1 + days.length + 1 + 6;
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
-        <h2 className="text-base font-semibold text-gray-900 mb-4">月間サマリー</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <div className="bg-blue-50 rounded-xl p-3"><div className="text-[10px] text-blue-600 font-medium">総勤務時間</div><div className="text-xl font-bold text-blue-900">{monthlyStats.totalHours.toFixed(1)}h</div></div>
-          <div className="bg-green-50 rounded-xl p-3"><div className="text-[10px] text-green-600 font-medium">勤務日数</div><div className="text-xl font-bold text-green-900">{monthlyStats.totalDays}日</div></div>
-          <div className="bg-purple-50 rounded-xl p-3"><div className="text-[10px] text-purple-600 font-medium">平均日勤</div><div className="text-xl font-bold text-purple-900">{monthlyStats.totalDays > 0 ? (monthlyStats.totalHours / monthlyStats.totalDays).toFixed(1) : 0}h</div></div>
-          <div className="bg-rose-50 rounded-xl p-3"><div className="text-[10px] text-rose-600 font-medium">社員休憩</div><div className="text-xl font-bold text-rose-900">{getManagerBreakHours().toFixed(1)}h</div></div>
-          <div className="bg-orange-50 rounded-xl p-3"><div className="text-[10px] text-orange-600 font-medium">スタッフ</div><div className="text-xl font-bold text-orange-900">{users.filter(u => u.role !== 'manager').length}人</div></div>
+    <div className="space-y-3">
+      {/* ── Monthly summary cards ── */}
+      <div className="bg-white border border-gray-300 p-3">
+        <h2 className="text-xs font-bold text-gray-900 mb-2">月間サマリー</h2>
+        <div className="grid grid-cols-5 gap-2">
+          <div className="bg-blue-50 p-2 rounded"><div className="text-[9px] text-blue-600 font-medium">総勤務時間</div><div className="text-sm font-bold text-blue-900">{monthlyStats.totalHours.toFixed(1)}h</div></div>
+          <div className="bg-green-50 p-2 rounded"><div className="text-[9px] text-green-600 font-medium">勤務日数</div><div className="text-sm font-bold text-green-900">{monthlyStats.totalDays}日</div></div>
+          <div className="bg-purple-50 p-2 rounded"><div className="text-[9px] text-purple-600 font-medium">平均日勤</div><div className="text-sm font-bold text-purple-900">{monthlyStats.totalDays > 0 ? (monthlyStats.totalHours / monthlyStats.totalDays).toFixed(1) : 0}h</div></div>
+          <div className="bg-rose-50 p-2 rounded"><div className="text-[9px] text-rose-600 font-medium">社員休憩</div><div className="text-sm font-bold text-rose-900">{getManagerBreakHours().toFixed(1)}h</div></div>
+          <div className="bg-orange-50 p-2 rounded"><div className="text-[9px] text-orange-600 font-medium">スタッフ</div><div className="text-sm font-bold text-orange-900">{users.filter(u => u.role !== 'manager').length}人</div></div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
-        <h2 className="text-base font-semibold text-gray-900 mb-4">日別売上・経営指標</h2>
+      {/* ── Daily sales entry table ── */}
+      <div className="bg-white border border-gray-300 p-3">
+        <h2 className="text-xs font-bold text-gray-900 mb-2">日別売上入力</h2>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse min-w-[500px]">
-            <thead><tr className="bg-gray-50">
-              <th className="px-2 py-2 text-left font-medium text-gray-500 border-b">日</th>
-              <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">売上</th>
-              <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">前年</th>
-              <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">前年比</th>
-              <th className="px-2 py-2 text-center font-medium text-gray-500 border-b">操作</th>
-            </tr></thead>
+          <table className="w-full border-collapse" style={{ fontSize: '10px' }}>
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="px-1 py-1 text-left font-medium text-gray-500 border border-gray-300">日</th>
+                <th className="px-1 py-1 text-right font-medium text-gray-500 border border-gray-300">売上</th>
+                <th className="px-1 py-1 text-right font-medium text-gray-500 border border-gray-300">前年</th>
+                <th className="px-1 py-1 text-right font-medium text-gray-500 border border-gray-300">前年比</th>
+                <th className="px-1 py-1 text-right font-medium text-gray-500 border border-gray-300">前年ﾗﾝﾁ</th>
+                <th className="px-1 py-1 text-right font-medium text-gray-500 border border-gray-300">前年ﾃﾞｨﾅｰ</th>
+                <th className="px-1 py-1 text-center font-medium text-gray-500 border border-gray-300">操作</th>
+              </tr>
+            </thead>
             <tbody>
               {days.map(d => {
                 const ds = sales[d] || {};
-                const cur = ds.current || 0, prev = ds.prevYear || 0;
+                const cur = ds.current || 0, prev = ds.prevYear || 0, pl = ds.prevYearLunch || 0, pdInner = ds.prevYearDinner || 0;
                 const ratio = prev > 0 ? ((cur - prev) / prev * 100).toFixed(1) : '-';
+                const isEdit = editingSales === d;
                 return (
-                  <tr key={d} className="border-b border-gray-100">
-                    <td className="px-2 py-2 font-medium text-gray-800">{d}日</td>
-                    <td className="px-2 py-2 text-right">
-                      {editingSales === d ? <input type="number" defaultValue={cur} onBlur={e => { setSales({ ...sales, [d]: { ...sales[d], current: parseInt(e.target.value) || 0 } }); }} className="w-20 px-1.5 py-1 border rounded text-right text-xs" /> : <span className="font-medium">¥{cur.toLocaleString()}</span>}
+                  <tr key={d} className="bg-white">
+                    <td className="px-1 py-0.5 font-medium text-gray-800 border border-gray-300">{d}日</td>
+                    <td className="px-1 py-0.5 text-right border border-gray-300">
+                      {isEdit ? <input type="number" defaultValue={cur} onChange={e => setSales({ ...sales, [d]: { ...sales[d], current: parseInt(e.target.value) || 0 } })} className="w-full text-[9px] px-0.5 py-0 border text-right" /> : <span className="font-medium">{cur ? `¥${cur.toLocaleString()}` : '-'}</span>}
                     </td>
-                    <td className="px-2 py-2 text-right">
-                      {editingSales === d ? <input type="number" defaultValue={prev} onBlur={e => { setSales({ ...sales, [d]: { ...sales[d], prevYear: parseInt(e.target.value) || 0 } }); }} className="w-20 px-1.5 py-1 border rounded text-right text-xs" /> : <span>¥{prev.toLocaleString()}</span>}
+                    <td className="px-1 py-0.5 text-right border border-gray-300">
+                      {isEdit ? <input type="number" defaultValue={prev} onChange={e => setSales({ ...sales, [d]: { ...sales[d], prevYear: parseInt(e.target.value) || 0 } })} className="w-full text-[9px] px-0.5 py-0 border text-right" /> : <span>{prev ? `¥${prev.toLocaleString()}` : '-'}</span>}
                     </td>
-                    <td className="px-2 py-2 text-right">{typeof ratio === 'number' ? <span className={ratio >= 0 ? 'text-green-600' : 'text-red-600'}>{ratio >= 0 ? '+' : ''}{ratio}%</span> : <span className="text-gray-400">-</span>}</td>
-                    <td className="px-2 py-2 text-center">
-                      {editingSales === d ? <button onClick={() => handleSaveSales(d)} className="text-green-600 text-xs font-medium">保存</button> : <button onClick={() => setEditingSales(d)} className="text-blue-600 text-xs">編集</button>}
+                    <td className="px-1 py-0.5 text-right border border-gray-300">
+                      {typeof ratio === 'number' ? <span className={ratio >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>{ratio >= 0 ? '+' : ''}{ratio}%</span> : <span className="text-gray-400">-</span>}
+                    </td>
+                    <td className="px-1 py-0.5 text-right border border-gray-300">
+                      {isEdit ? <input type="number" defaultValue={pl} onChange={e => setSales({ ...sales, [d]: { ...sales[d], prevYearLunch: parseInt(e.target.value) || 0 } })} className="w-full text-[9px] px-0.5 py-0 border text-right" /> : <span>{pl ? `¥${pl.toLocaleString()}` : '-'}</span>}
+                    </td>
+                    <td className="px-1 py-0.5 text-right border border-gray-300">
+                      {isEdit ? <input type="number" defaultValue={pdInner} onChange={e => setSales({ ...sales, [d]: { ...sales[d], prevYearDinner: parseInt(e.target.value) || 0 } })} className="w-full text-[9px] px-0.5 py-0 border text-right" /> : <span>{pdInner ? `¥${pdInner.toLocaleString()}` : '-'}</span>}
+                    </td>
+                    <td className="px-1 py-0.5 text-center border border-gray-300">
+                      {isEdit ? <button onClick={() => setEditingSales(null)} className="text-green-600 text-[9px] font-medium">保存</button> : <button onClick={() => setEditingSales(d)} className="text-blue-600 text-[9px]">編集</button>}
                     </td>
                   </tr>
                 );
@@ -909,83 +1118,155 @@ function SalesView({
         </div>
       </div>
 
-      {isManager && (
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <h2 className="text-sm font-semibold text-gray-900">部長提出用 シフト表</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse min-w-[700px]">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 min-w-[80px]">氏名</th>
-                  {days.map(d => (
-                    <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[68px]">{d}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {managerUser && <SalesStaffRow user={managerUser} shifts={shifts} days={days} formatShiftForManager={formatShiftForManager} />}
-                <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">キッチン</td></tr>
-                {kitchenUsers.map(u => <SalesStaffRow key={u.id} user={u} shifts={shifts} days={days} formatShiftForManager={formatShiftForManager} />)}
-                <tr className="bg-indigo-50">
-                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-indigo-700 border-b border-r border-gray-200 bg-indigo-50">🍜 製麺</td>
-                  {days.map(d => {
-                    const val = seimen[d] || '';
-                    return <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-medium text-indigo-700">{val || '/'}</td>;
-                  })}
-                </tr>
-                <tr className="bg-red-50">
-                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-red-700 border-b border-r border-gray-200 bg-red-50">☀ 午前不足</td>
-                  {days.map(d => <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-bold text-red-600">{shortageAM[d] != null ? shortageAM[d] : '-'}</td>)}
-                </tr>
-                <tr className="bg-orange-50">
-                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-orange-700 border-b border-r border-gray-200 bg-orange-50">🌅 午後不足</td>
-                  {days.map(d => <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-bold text-orange-600">{shortagePM[d] != null ? shortagePM[d] : '-'}</td>)}
-                </tr>
-                <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">ホール</td></tr>
-                {hallUsers.map(u => <SalesStaffRow key={u.id} user={u} shifts={shifts} days={days} formatShiftForManager={formatShiftForManager} />)}
-                <tr className="bg-cyan-50">
-                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-cyan-700 border-b border-r border-gray-200 bg-cyan-50">💰 売上 昼</td>
-                  {days.map(d => {
-                    const val = salesLunch[d] || {};
-                    return <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-medium text-cyan-700">{val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}</td>;
-                  })}
-                </tr>
-                <tr className="bg-blue-50">
-                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-blue-700 border-b border-r border-gray-200 bg-blue-50">🌙 売上 ディナー</td>
-                  {days.map(d => {
-                    const val = salesDinner[d] || {};
-                    return <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-medium text-blue-700">{val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}</td>;
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
+      {/* ── Shift table (Excel-like, same as ShiftTableView manager mode) ── */}
+      <div className="bg-white border border-gray-300 overflow-hidden">
+        <div className="px-2 py-1 border-b border-gray-300 bg-gray-50">
+          <span className="text-[10px] font-bold text-gray-700">部長提出用 シフト表</span>
         </div>
-      )}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ fontSize: '10px' }}>
+            <thead>
+              <tr className="bg-gray-50">
+                <th rowSpan={2} className="sticky left-0 z-10 bg-gray-50 px-1.5 py-0.5 text-left font-medium text-gray-500 border border-gray-300 min-w-[75px]">氏名</th>
+                {dayInfo.map(({ d, dow }) => {
+                  const bg = dow === 0 ? 'bg-red-100' : dow === 6 ? 'bg-blue-100' : 'bg-green-100';
+                  return <th key={d} className={`px-0.5 py-0.5 text-center font-medium text-gray-700 border border-gray-300 ${bg} w-[52px]`}>
+                    <div className="text-[9px]">{d}</div>
+                    <div className={`text-[8px] ${dow === 0 ? 'text-red-600' : dow === 6 ? 'text-blue-600' : 'text-green-700'}`}>{['日','月','火','水','木','金','土'][dow]}</div>
+                  </th>;
+                })}
+                <th rowSpan={2} className="px-1 py-0.5 text-center font-medium text-gray-500 border border-gray-300 w-[52px]">前半<br/>合計</th>
+                <th colSpan={3} className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300 w-[55px]">第1週</th>
+                <th colSpan={3} className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300 w-[55px]">第2週</th>
+              </tr>
+              <tr className="bg-green-50">
+                {['売上','時間','人時'].map(h => <th key={h} className="px-0.5 py-0.5 text-center font-medium text-green-700 bg-green-100 border border-gray-300 text-[8px] w-[55px]">{h}</th>)}
+                {['売上','時間','人時'].map(h => <th key={h} className="px-0.5 py-0.5 text-center font-medium text-green-700 bg-green-100 border border-gray-300 text-[8px] w-[55px]">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {/* KPI rows */}
+              <KpiRow label="売上予測(千円)" days={days} w1={w1} w2={w2} fn={d => (sales[d]?.current || 0) / 1000} getDailyStats={null} />
+              <KpiRow label="前年売上" days={days} w1={w1} w2={w2} fn={d => sales[d]?.prevYear || 0} getDailyStats={null} />
+              <KpiRow label="前年比(%)" days={days} w1={w1} w2={w2} fn={d => { const p = sales[d]?.prevYear; const c = sales[d]?.current; return (p && p > 0) ? ((c - p) / p * 100).toFixed(1) : '-'; }} getDailyStats={null} isRatio />
+              <KpiRow label="前年ﾗﾝﾁ売上" days={days} w1={w1} w2={w2} fn={d => sales[d]?.prevYearLunch || 0} getDailyStats={null} />
+              <KpiRow label="前年ﾃﾞｨﾅｰ売上" days={days} w1={w1} w2={w2} fn={d => sales[d]?.prevYearDinner || 0} getDailyStats={null} />
+
+              {/* Staff section */}
+              <tr><td colSpan={totalCols} className="px-1.5 py-0.5 font-bold text-gray-500 bg-gray-100 border border-gray-300">スタッフ</td></tr>
+
+              {managerUser && <SalesStaffPair user={managerUser} shifts={shifts} days={days} dayInfo={dayInfo} isManager={isManager} isManagerUser />}
+              <tr><td colSpan={totalCols} className="px-1.5 py-0.5 font-bold text-gray-500 bg-gray-100 border border-gray-300">キッチン</td></tr>
+              {kitchenUsers.map(u => <SalesStaffPair key={u.id} user={u} shifts={shifts} days={days} dayInfo={dayInfo} isManager={isManager} />)}
+
+              <SpecialRow label="🍜 製麺" days={days} data={seimen} setData={setSeimen} isManager={isManager} allStaff={allStaff} cellType="select" />
+              <SpecialRow label="☀ 午前不足" days={days} data={shortageAM} setData={setShortageAM} isManager={isManager} cellType="number" bg="bg-red-50" color="text-red-700" />
+              <SpecialRow label="🌅 午後不足" days={days} data={shortagePM} setData={setShortagePM} isManager={isManager} cellType="number" bg="bg-orange-50" color="text-orange-700" />
+
+              <tr><td colSpan={totalCols} className="px-1.5 py-0.5 font-bold text-gray-500 bg-gray-100 border border-gray-300">ホール</td></tr>
+              {hallUsers.map(u => <SalesStaffPair key={u.id} user={u} shifts={shifts} days={days} dayInfo={dayInfo} isManager={isManager} />)}
+
+              <SalesRow label="💰 売上 昼" days={days} data={salesLunch} setData={setSalesLunch} isManager={isManager} bg="bg-cyan-50" color="text-cyan-700" />
+              <SalesRow label="🌙 売上 ディナー" days={days} data={salesDinner} setData={setSalesDinner} isManager={isManager} bg="bg-blue-50" color="text-blue-700" />
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
 
-function SalesStaffRow({ user, shifts, days, formatShiftForManager }) {
-  const s = shifts[user.id]?.shifts || {};
+// ── SalesStaffPair: 2 rows for one staff in sales view (same layout, no cell click) ──
+function SalesStaffPair({ user, shifts, days, dayInfo, isManager, isManagerUser }) {
+  const userShifts = shifts[user.id]?.shifts || {};
+
+  const calcWeeklyHours = (weekDays) => {
+    let total = 0;
+    for (const d of weekDays) {
+      const val = userShifts[d];
+      if (!val || val === '/' || val === '-') continue;
+      const parsed = isManagerUser ? parseManagerShift(val) : parseShiftForNewLayout(val);
+      if (!parsed) continue;
+      if (isManagerUser) {
+        total += parseFloat(parsed.end) - parseFloat(parsed.start);
+      } else {
+        if (parsed.Ls != null) total += parsed.Le - parsed.Ls;
+        if (parsed.Ds != null) total += parsed.De - parsed.Ds;
+      }
+    }
+    return total;
+  };
+
+  const totalHours = calcWeeklyHours(days);
+  const w1Hours = calcWeeklyHours(days.slice(0, 7));
+  const w2Hours = calcWeeklyHours(days.slice(7));
+
+  const labelTop = isManagerUser ? '出' : 'L';
+  const labelBot = isManagerUser ? '退' : 'D';
+
+  const renderCell = (d, isTop) => {
+    const val = userShifts[d];
+    const isEmpty = !val || val === '/';
+    const isRejected = val === '-';
+
+    if (isEmpty || isRejected) {
+      if (isManagerUser && isEmpty) {
+        const n = getKohoCount(user.id, d, shifts, days);
+        const circled = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'][n - 1] || '⑩';
+        return <span className="text-[8px] font-bold text-gray-500">公休{circled}</span>;
+      }
+      if (isTop) return <span className="text-gray-300 font-light">/</span>;
+      return null;
+    }
+
+    if (isManagerUser) {
+      const parsed = parseManagerShift(val);
+      if (!parsed) return <span className="text-gray-300 font-light">/</span>;
+      return <span className="text-[10px] font-bold text-gray-800">{isTop ? parsed.start : parsed.end}</span>;
+    }
+
+    const parsed = parseShiftForNewLayout(val);
+    if (!parsed) return <span className="text-gray-300 font-light">/</span>;
+    if (isTop) {
+      if (parsed.Ls == null) return null;
+      return <div className="flex justify-between px-0.5 text-[9px] font-bold text-gray-800"><span>{parsed.Ls}</span><span>{parsed.Le}</span></div>;
+    }
+    if (parsed.Ds == null) return null;
+    return <div className="flex justify-between px-0.5 text-[9px] font-bold text-gray-800"><span>{parsed.Ds}</span><span>{parsed.De}</span></div>;
+  };
+
+  const cellClass = (d, isEmpty, isRejected) =>
+    `px-0 py-0 text-center border border-gray-300 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'}`;
+
   return (
-    <tr className="bg-white border-b border-gray-100">
-      <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 bg-white">{user.name}</td>
-      {days.map(d => {
-        const val = s[d];
-        const isEmpty = !val || val === '/';
-        const isRejected = val === '-';
-        return (
-          <td key={d} className={`px-1 py-1 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'}`}>
-            {isEmpty && <span className="text-gray-300 text-sm font-light">/</span>}
-            {isRejected && <span className="text-red-400 text-sm font-bold">-</span>}
-            {!isEmpty && !isRejected && <span className="text-[9px] font-medium text-gray-700">{formatShiftForManager(val)}</span>}
-          </td>
-        );
-      })}
-    </tr>
+    <>
+      <tr className="bg-white">
+        <td className="sticky left-0 z-10 px-1.5 py-0.5 text-[9px] font-medium text-gray-700 border border-gray-300 bg-white whitespace-nowrap">
+          {labelTop} {user.name}
+        </td>
+        {days.map(d => {
+          const val = userShifts[d];
+          const isEmpty = !val || val === '/';
+          const isRej = val === '-';
+          return <td key={`${d}-t`} className={cellClass(d, isEmpty, isRej)} style={{ height: '22px' }}>{renderCell(d, true)}</td>;
+        })}
+        <td className="px-0.5 py-0.5 text-center font-bold text-gray-700 border border-gray-300 bg-gray-100">{totalHours.toFixed(1)}</td>
+        <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w1Hours.toFixed(1)}</td>
+        <td className="px-0.5 py-0.5 text-center font-medium text-green-800 bg-green-100 border border-gray-300" colSpan={3}>{w2Hours.toFixed(1)}</td>
+      </tr>
+      <tr className="bg-white">
+        <td className="sticky left-0 z-10 px-1.5 py-0.5 text-[9px] text-gray-500 border border-gray-300 bg-white whitespace-nowrap">{labelBot}</td>
+        {days.map(d => {
+          const val = userShifts[d];
+          const isEmpty = !val || val === '/';
+          const isRej = val === '-';
+          return <td key={`${d}-b`} className={cellClass(d, isEmpty, isRej)} style={{ height: '22px' }}>{renderCell(d, false)}</td>;
+        })}
+        <td className="px-0.5 py-0.5 border border-gray-300 bg-gray-50" />
+        <td className="px-0.5 py-0.5 border border-gray-300 bg-green-100" colSpan={3} />
+        <td className="px-0.5 py-0.5 border border-gray-300 bg-green-100" colSpan={3} />
+      </tr>
+    </>
   );
 }
 
