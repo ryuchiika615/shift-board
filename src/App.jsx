@@ -18,6 +18,19 @@ const save = (key, v) => {
 const groups = ['店長', 'キッチン', 'ホール'];
 const days = Array.from({ length: 15 }, (_, i) => i + 1);
 
+// 部長提出用の表記に変換
+function formatShiftForManager(val) {
+  if (!val || val === '/' || val === '-') return val || '/';
+  const parts = val.split('-');
+  if (parts.length !== 2) return val;
+  const s = parseFloat(parts[0]);
+  const e = (parts[1] === 'L' || parts[1] === '22') ? 22 : parseFloat(parts[1]);
+  if (isNaN(s) || isNaN(e)) return val;
+  if (e <= 16) return `L${s}〜${e}`;
+  if (s >= 16) return `D${s}〜${e}`;
+  return `L${s}〜15 D16〜${e}`;
+}
+
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loginStep, setLoginStep] = useState('select');
@@ -182,7 +195,21 @@ function App() {
     return e - s;
   }, []);
 
-  const getDailyStats = useCallback((day) => {
+  // 社員（店長）の日別休憩時間を計算: 出勤日は1.5h
+  const getManagerBreakHours = useCallback(() => {
+    const manager = users.find(u => u.role === 'manager');
+    if (!manager) return 0;
+    const mShifts = shifts[manager.id]?.shifts || {};
+    let breakDays = 0;
+    days.forEach(d => {
+      const v = mShifts[d];
+      if (v && v !== '-' && v !== '/') breakDays++;
+    });
+    return breakDays * 1.5;
+  }, [users, shifts]);
+
+  // 総勤務時間（社員休憩を差し引く前）
+  const getDailyStatsRaw = useCallback((day) => {
     let h = 0, c = 0;
     Object.values(shifts).forEach(u => {
       const v = u.shifts[day];
@@ -191,32 +218,40 @@ function App() {
     return { totalHours: h, staffCount: c };
   }, [shifts, calculateHours]);
 
+  // 総勤務時間（社員休憩差引後）
+  const getDailyStats = useCallback((day) => {
+    const raw = getDailyStatsRaw(day);
+    const manager = users.find(u => u.role === 'manager');
+    const mShifts = manager ? shifts[manager.id]?.shifts || {} : {};
+    const mVal = mShifts[day];
+    const managerWorks = mVal && mVal !== '-' && mVal !== '/';
+    const breakH = managerWorks ? 1.5 : 0;
+    return { totalHours: raw.totalHours - breakH, staffCount: raw.staffCount, managerBreak: breakH, rawHours: raw.totalHours };
+  }, [getDailyStatsRaw, users, shifts]);
+
   const getMonthlyStats = useCallback(() => {
-    let h = 0, d = 0;
+    let h = 0, d = 0, brk = 0;
     days.forEach(day => {
-      const { totalHours } = getDailyStats(day);
+      const { totalHours, managerBreak } = getDailyStats(day);
       h += totalHours;
-      if (totalHours > 0) d++;
+      brk += managerBreak;
+      if (totalHours > 0 || managerBreak > 0) d++;
     });
-    return { totalHours: h, totalDays: d };
+    return { totalHours: h, totalDays: d, totalManagerBreak: brk };
   }, [getDailyStats]);
 
-  const renderCellContent = (val) => {
-    if (!val || val === '/') return <span className="text-gray-400 text-lg font-light leading-none">/</span>;
-    if (val === '-') return <span className="text-red-400 text-lg font-bold leading-none">-</span>;
-    const parts = val.split('-');
-    if (parts.length !== 2) return <span className="text-xs">{val}</span>;
-    return (
-      <div className="flex flex-col items-center leading-tight">
-        <span className="text-xs font-bold text-gray-800">{parts[0]}</span>
-        <span className="text-[10px] text-gray-400">─</span>
-        <span className="text-xs font-bold text-gray-800">{parts[1]}</span>
-      </div>
-    );
-  };
-
   const isManager = currentUser?.role === 'manager';
-  const monthlyStats = currentUser ? getMonthlyStats() : { totalHours: 0, totalDays: 0 };
+  const monthlyStats = currentUser ? getMonthlyStats() : { totalHours: 0, totalDays: 0, totalManagerBreak: 0 };
+
+  // 売上データからAp時間計、人時売上を計算
+  const getDaySalesData = (day) => {
+    const ds = sales[day] || {};
+    const currentSales = ds.current || 0;
+    const { totalHours, rawHours } = getDailyStats(day);
+    const apHours = rawHours;
+    const laborSalesRatio = apHours > 0 ? currentSales / apHours : 0;
+    return { sales: currentSales, apHours, laborSalesRatio };
+  };
 
   // ── ログイン画面 ──
   if (!currentUser) {
@@ -234,22 +269,14 @@ function App() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">名前を選択</label>
-                <select
-                  value={selectedUserId}
-                  onChange={handleSelectUser}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-white appearance-none"
-                >
+                <select value={selectedUserId} onChange={handleSelectUser} className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-sm bg-white appearance-none">
                   <option value="">-- 選択してください --</option>
                   {groups.map(group => {
                     const gUsers = usersByGroup[group];
                     if (gUsers.length === 0) return null;
-                    return (
-                      <optgroup key={group} label={`◆ ${group}`}>
-                        {gUsers.map(u => (
-                          <option key={u.id} value={u.id}>{u.name}</option>
-                        ))}
-                      </optgroup>
-                    );
+                    return (<optgroup key={group} label={`◆ ${group}`}>
+                      {gUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </optgroup>);
                   })}
                 </select>
               </div>
@@ -264,28 +291,13 @@ function App() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">PINコード（4桁）</label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={pinInput}
-                  onChange={e => { setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4)); setLoginError(''); }}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-center text-2xl tracking-[0.5em]"
-                  placeholder="・ ・ ・ ・"
-                  autoFocus
-                  required
-                />
+                <input type="password" inputMode="numeric" maxLength={4} value={pinInput} onChange={e => { setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4)); setLoginError(''); }} className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-center text-2xl tracking-[0.5em]" placeholder="・ ・ ・ ・" autoFocus required />
               </div>
               {loginError && <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm text-center">{loginError}</div>}
-              <button type="submit" disabled={pinInput.length !== 4} className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium hover:bg-blue-700 disabled:bg-gray-300 transition-colors">
-                ログイン
-              </button>
-              <button type="button" onClick={goBackToSelect} className="w-full text-sm text-gray-500 hover:text-gray-700">
-                戻る
-              </button>
+              <button type="submit" disabled={pinInput.length !== 4} className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium hover:bg-blue-700 disabled:bg-gray-300 transition-colors">ログイン</button>
+              <button type="button" onClick={goBackToSelect} className="w-full text-sm text-gray-500 hover:text-gray-700">戻る</button>
             </form>
           )}
-
           <div className="mt-6 p-3 bg-gray-50 rounded-xl text-xs text-gray-500">
             <p className="mb-1">テスト用PIN:</p>
             <p>店長: 1111 / スタッフ: 0000</p>
@@ -308,92 +320,58 @@ function App() {
                 <span className="ml-2 text-gray-400">{currentUser.group}</span>
               </p>
             </div>
-            <button onClick={handleLogout} className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">ログアウト</button>
+            <div className="flex items-center gap-3">
+              {isManager && (
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] font-medium ${viewMode === 'employee' ? 'text-blue-600' : 'text-gray-400'}`}>スタッフ用</span>
+                  <button onClick={() => setViewMode(viewMode === 'employee' ? 'manager' : 'employee')} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${viewMode === 'manager' ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${viewMode === 'manager' ? 'translate-x-[18px]' : 'translate-x-[2px]'}`} />
+                  </button>
+                  <span className={`text-[10px] font-medium ${viewMode === 'manager' ? 'text-blue-600' : 'text-gray-400'}`}>部長提出用</span>
+                </div>
+              )}
+              <button onClick={handleLogout} className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">ログアウト</button>
+            </div>
           </div>
         </div>
       </header>
 
-      {isManager && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-sm text-amber-700">
+      {isManager && viewMode === 'manager' && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs text-amber-700">
+          <span className="font-medium">🔧 部長提出用ビュー</span> セルをクリックして採用・不採用を切り替えられます
+        </div>
+      )}
+      {isManager && viewMode === 'employee' && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs text-amber-700">
           <span className="font-medium">🔧 店長モード</span> 表のセルをクリックして採用・不採用を切り替えられます
         </div>
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-4">
-        {/* タブ */}
         <div className="flex flex-wrap gap-1.5 mb-4">
           <TabBtn active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')}>シフト表</TabBtn>
           {!isManager && <TabBtn active={activeTab === 'request'} onClick={() => setActiveTab('request')}>シフト提出</TabBtn>}
           {isManager && <>
-            <TabBtn active={activeTab === 'approval'} onClick={() => setActiveTab('approval')}>
-              シフト承認{Object.keys(requests).length > 0 && <span className="ml-1.5 bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{Object.keys(requests).length}</span>}
-            </TabBtn>
+            <TabBtn active={activeTab === 'approval'} onClick={() => setActiveTab('approval')}>シフト承認{Object.keys(requests).length > 0 && <span className="ml-1.5 bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{Object.keys(requests).length}</span>}</TabBtn>
             <TabBtn active={activeTab === 'users'} onClick={() => setActiveTab('users')}>ユーザー管理</TabBtn>
             <TabBtn active={activeTab === 'sales'} onClick={() => setActiveTab('sales')}>売上管理</TabBtn>
           </>}
         </div>
 
-        {/* ── シフト表 ── */}
+        {/* ── シフト表（スタッフ用 / 部長提出用） ── */}
         {activeTab === 'calendar' && (
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase border-b border-r border-gray-200 min-w-[80px]">氏名</th>
-                    {days.map(d => (
-                      <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[52px]">{d}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.filter(u => u.role !== 'manager' || isManager).map((user, ri) => {
-                    const userShifts = shifts[user.id]?.shifts || {};
-                    return (
-                      <tr key={user.id} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                        <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 whitespace-nowrap">
-                          <div className={`${ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} py-0.5`}>
-                            {user.name}
-                            <span className="ml-1 text-[9px] text-gray-400">({user.group === '店長' ? '' : user.group === 'キッチン' ? 'K' : 'H'})</span>
-                          </div>
-                        </td>
-                        {days.map(d => {
-                          const val = userShifts[d];
-                          const isEmpty = !val || val === '/';
-                          const isRejected = val === '-';
-                          const clickable = isManager && user.role !== 'manager';
-                          return (
-                            <td
-                              key={d}
-                              onClick={() => clickable && handleCellClick(user.id, d)}
-                              className={`px-0 py-0 text-center border-b border-r border-gray-200 h-[40px] ${
-                                isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'
-                              } ${clickable ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
-                            >
-                              {isEmpty && <span className="text-gray-300 text-lg font-light leading-none">/</span>}
-                              {isRejected && <span className="text-red-400 text-lg font-bold leading-none">-</span>}
-                              {!isEmpty && !isRejected && (
-                                <div className="flex flex-col items-center leading-tight py-0.5">
-                                  <span className="text-[11px] font-bold text-gray-800">{val.split('-')[0]}</span>
-                                  <span className="text-[8px] text-gray-400 leading-[10px]">─</span>
-                                  <span className="text-[11px] font-bold text-gray-800">{val.split('-')[1]}</span>
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-3 py-2 border-t border-gray-200 text-[10px] text-gray-400 flex gap-4">
-              <span><span className="text-gray-300 text-sm font-light">/</span> = 未提出</span>
-              <span><span className="text-red-400 font-bold">-</span> = 不採用</span>
-              <span className="text-blue-600 font-bold">09─22</span> = 採用
-            </div>
-          </div>
+          <ShiftTableView
+            users={users}
+            shifts={shifts}
+            days={days}
+            viewMode={viewMode}
+            isManager={isManager}
+            sales={sales}
+            getDailyStats={getDailyStats}
+            getDaySalesData={getDaySalesData}
+            handleCellClick={handleCellClick}
+            formatShiftForManager={formatShiftForManager}
+          />
         )}
 
         {/* ── シフト提出 ── */}
@@ -410,12 +388,9 @@ function App() {
                   const isApproved = app && app !== '-';
                   const isRejected = app === '-';
                   const f = requestForms[day] || { start: '', end: '' };
-
-                  // 休日を省いたパターンも許可（自由入力）
                   return (
                     <div key={day} className={`border rounded-xl p-3 ${isApproved ? 'bg-blue-50 border-blue-200' : isRejected ? 'bg-red-50 border-red-200' : req ? 'bg-green-50 border-green-200' : 'bg-white'}`}>
                       <div className="text-sm font-bold text-gray-700 mb-2">{day}日</div>
-
                       {isApproved ? (
                         <div className="text-xs text-blue-700 font-medium text-center py-2">✅ {app}</div>
                       ) : isRejected ? (
@@ -428,25 +403,11 @@ function App() {
                       ) : (
                         <div className="space-y-1.5">
                           <div className="flex gap-1">
-                            <input
-                              type="text" inputMode="numeric" placeholder="開始" value={f.start}
-                              onChange={e => setRequestForms({ ...requestForms, [day]: { ...f, start: e.target.value.replace(/[^0-9.]/g, '') } })}
-                              className="w-1/2 px-2 py-1.5 border rounded-lg text-xs text-center"
-                            />
+                            <input type="text" inputMode="numeric" placeholder="開始" value={f.start} onChange={e => setRequestForms({ ...requestForms, [day]: { ...f, start: e.target.value.replace(/[^0-9.]/g, '') } })} className="w-1/2 px-2 py-1.5 border rounded-lg text-xs text-center" />
                             <span className="text-xs text-gray-400 self-center">→</span>
-                            <input
-                              type="text" inputMode="numeric" placeholder="終了" value={f.end}
-                              onChange={e => setRequestForms({ ...requestForms, [day]: { ...f, end: e.target.value.replace(/[^0-9.Ll]/g, '').toUpperCase() } })}
-                              className="w-1/2 px-2 py-1.5 border rounded-lg text-xs text-center"
-                            />
+                            <input type="text" inputMode="numeric" placeholder="終了" value={f.end} onChange={e => setRequestForms({ ...requestForms, [day]: { ...f, end: e.target.value.replace(/[^0-9.Ll]/g, '').toUpperCase() } })} className="w-1/2 px-2 py-1.5 border rounded-lg text-xs text-center" />
                           </div>
-                          <button
-                            onClick={() => handleRequestSubmit(day)}
-                            disabled={!f.start || !f.end}
-                            className="w-full bg-blue-600 text-white py-1.5 rounded-lg text-[11px] font-medium hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400"
-                          >
-                            提出
-                          </button>
+                          <button onClick={() => handleRequestSubmit(day)} disabled={!f.start || !f.end} className="w-full bg-blue-600 text-white py-1.5 rounded-lg text-[11px] font-medium hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400">提出</button>
                         </div>
                       )}
                     </div>
@@ -523,60 +484,26 @@ function App() {
         )}
 
         {/* ── 売上管理 ── */}
-        {activeTab === 'sales' && isManager && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
-              <h2 className="text-base font-semibold text-gray-900 mb-4">月間サマリー</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-blue-50 rounded-xl p-3"><div className="text-[10px] text-blue-600 font-medium">総勤務時間</div><div className="text-xl font-bold text-blue-900">{monthlyStats.totalHours.toFixed(1)}h</div></div>
-                <div className="bg-green-50 rounded-xl p-3"><div className="text-[10px] text-green-600 font-medium">勤務日数</div><div className="text-xl font-bold text-green-900">{monthlyStats.totalDays}日</div></div>
-                <div className="bg-purple-50 rounded-xl p-3"><div className="text-[10px] text-purple-600 font-medium">平均日勤</div><div className="text-xl font-bold text-purple-900">{monthlyStats.totalDays > 0 ? (monthlyStats.totalHours / monthlyStats.totalDays).toFixed(1) : 0}h</div></div>
-                <div className="bg-orange-50 rounded-xl p-3"><div className="text-[10px] text-orange-600 font-medium">スタッフ</div><div className="text-xl font-bold text-orange-900">{users.filter(u => u.role !== 'manager').length}人</div></div>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
-              <h2 className="text-base font-semibold text-gray-900 mb-4">日別売上</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs border-collapse">
-                  <thead><tr className="bg-gray-50">
-                    <th className="px-3 py-2 text-left font-medium text-gray-500 border-b">日</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-500 border-b">売上</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-500 border-b">前年</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-500 border-b">前年比</th>
-                    <th className="px-3 py-2 text-center font-medium text-gray-500 border-b">操作</th>
-                  </tr></thead>
-                  <tbody>
-                    {days.map(d => {
-                      const ds = sales[d] || {};
-                      const cur = ds.current || 0, prev = ds.prevYear || 0;
-                      const ratio = prev > 0 ? ((cur - prev) / prev * 100).toFixed(1) : '-';
-                      return (
-                        <tr key={d} className="border-b border-gray-100">
-                          <td className="px-3 py-2 font-medium text-gray-800">{d}日</td>
-                          <td className="px-3 py-2 text-right">
-                            {editingSales === d ? <input type="number" defaultValue={cur} onBlur={e => { setSales({ ...sales, [d]: { ...sales[d], current: parseInt(e.target.value) || 0 } }); }} className="w-20 px-1.5 py-1 border rounded text-right text-xs" /> : <span className="font-medium">¥{cur.toLocaleString()}</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            {editingSales === d ? <input type="number" defaultValue={prev} onBlur={e => { setSales({ ...sales, [d]: { ...sales[d], prevYear: parseInt(e.target.value) || 0 } }); }} className="w-20 px-1.5 py-1 border rounded text-right text-xs" /> : <span>¥{prev.toLocaleString()}</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            {typeof ratio === 'number' ? <span className={ratio >= 0 ? 'text-green-600' : 'text-red-600'}>{ratio >= 0 ? '+' : ''}{ratio}%</span> : <span className="text-gray-400">-</span>}
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            {editingSales === d ? <button onClick={() => handleSaveSales(d)} className="text-green-600 text-xs font-medium">保存</button> : <button onClick={() => setEditingSales(d)} className="text-blue-600 text-xs">編集</button>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
+            {activeTab === 'sales' && isManager && (
+          <SalesView
+            days={days}
+            sales={sales}
+            setSales={setSales}
+            editingSales={editingSales}
+            setEditingSales={setEditingSales}
+            handleSaveSales={handleSaveSales}
+            monthlyStats={monthlyStats}
+            getManagerBreakHours={getManagerBreakHours}
+            getMonthlyStats={getMonthlyStats}
+            users={users}
+            isManager={isManager}
+            shifts={shifts}
+            formatShiftForManager={formatShiftForManager}
+          />
         )}
       </main>
 
-      {/* ── セル編集モーダル（店長用） ── */}
+      {/* ── セル編集モーダル ── */}
       {showCellModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xs">
@@ -621,6 +548,200 @@ function App() {
                 <button type="submit" className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700">追加</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── シフト表コンポーネント（スタッフ用 / 部長提出用） ──
+function ShiftTableView({ users, shifts, days, viewMode, isManager, sales, getDailyStats, getDaySalesData, handleCellClick, formatShiftForManager }) {
+  const showManagerFormat = viewMode === 'manager';
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead>
+            {/* KPI行（部長提出用のみ表示） */}
+            {showManagerFormat && (
+              <>
+                <tr className="bg-gray-50">
+                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200 min-w-[80px]">売上予測</th>
+                  {days.map(d => {
+                    const { sales: s } = getDaySalesData(d);
+                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200 w-[52px]">{s > 0 ? `¥${(s / 1000).toFixed(0)}k` : '-'}</th>;
+                  })}
+                </tr>
+                <tr className="bg-gray-50">
+                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200">Ap時間計</th>
+                  {days.map(d => {
+                    const { apHours } = getDaySalesData(d);
+                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200">{apHours.toFixed(1)}</th>;
+                  })}
+                </tr>
+                <tr className="bg-gray-50">
+                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200">人時売上</th>
+                  {days.map(d => {
+                    const { laborSalesRatio } = getDaySalesData(d);
+                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200">{laborSalesRatio > 0 ? `¥${laborSalesRatio.toFixed(0)}` : '-'}</th>;
+                  })}
+                </tr>
+              </>
+            )}
+            {/* 氏名・日付ヘッダー */}
+            <tr className="bg-gray-50">
+              <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase border-b border-r border-gray-200 min-w-[80px]">氏名</th>
+              {days.map(d => (
+                <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[52px]">{d}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {users.filter(u => u.role !== 'manager' || isManager).map((user, ri) => {
+              const userShifts = shifts[user.id]?.shifts || {};
+              return (
+                <tr key={user.id} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 whitespace-nowrap" style={{ background: ri % 2 === 0 ? 'white' : 'rgb(249 250 251 / 0.5)' }}>
+                    {user.name}
+                    <span className="ml-1 text-[9px] text-gray-400">({user.group === '店長' ? '' : user.group === 'キッチン' ? 'K' : 'H'})</span>
+                  </td>
+                  {days.map(d => {
+                    const val = userShifts[d];
+                    const isEmpty = !val || val === '/';
+                    const isRejected = val === '-';
+                    const clickable = isManager;
+                    return (
+                      <td
+                        key={d}
+                        onClick={() => clickable && handleCellClick(user.id, d)}
+                        className={`px-0 py-0 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'} ${clickable ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
+                        style={{ height: showManagerFormat ? '36px' : '40px' }}
+                      >
+                        {isEmpty && <span className="text-gray-300 text-lg font-light leading-none">/</span>}
+                        {isRejected && <span className="text-red-400 text-lg font-bold leading-none">-</span>}
+                        {!isEmpty && !isRejected && (
+                          showManagerFormat ? (
+                            <span className="text-[9px] font-medium text-gray-700 leading-tight">{formatShiftForManager(val)}</span>
+                          ) : (
+                            <div className="flex flex-col items-center leading-tight py-0.5">
+                              <span className="text-[11px] font-bold text-gray-800">{val.split('-')[0]}</span>
+                              <span className="text-[8px] text-gray-400 leading-[10px]">─</span>
+                              <span className="text-[11px] font-bold text-gray-800">{val.split('-')[1]}</span>
+                            </div>
+                          )
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-3 py-2 border-t border-gray-200 text-[10px] text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
+        <span><span className="text-gray-300 text-sm font-light">/</span> = 未提出</span>
+        <span><span className="text-red-400 font-bold">-</span> = 不採用</span>
+        <span className="text-blue-600 font-bold">09─22</span> = 採用
+        {showManagerFormat && <span className="text-green-700">L=ランチ D=ディナー</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── 売上管理コンポーネント ──
+function SalesView({ days, sales, setSales, editingSales, setEditingSales, handleSaveSales, monthlyStats, getManagerBreakHours, getMonthlyStats, users, isManager, shifts, formatShiftForManager }) {
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
+        <h2 className="text-base font-semibold text-gray-900 mb-4">月間サマリー</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="bg-blue-50 rounded-xl p-3"><div className="text-[10px] text-blue-600 font-medium">総勤務時間</div><div className="text-xl font-bold text-blue-900">{monthlyStats.totalHours.toFixed(1)}h</div></div>
+          <div className="bg-green-50 rounded-xl p-3"><div className="text-[10px] text-green-600 font-medium">勤務日数</div><div className="text-xl font-bold text-green-900">{monthlyStats.totalDays}日</div></div>
+          <div className="bg-purple-50 rounded-xl p-3"><div className="text-[10px] text-purple-600 font-medium">平均日勤</div><div className="text-xl font-bold text-purple-900">{monthlyStats.totalDays > 0 ? (monthlyStats.totalHours / monthlyStats.totalDays).toFixed(1) : 0}h</div></div>
+          <div className="bg-rose-50 rounded-xl p-3"><div className="text-[10px] text-rose-600 font-medium">社員休憩</div><div className="text-xl font-bold text-rose-900">{getManagerBreakHours().toFixed(1)}h</div></div>
+          <div className="bg-orange-50 rounded-xl p-3"><div className="text-[10px] text-orange-600 font-medium">スタッフ</div><div className="text-xl font-bold text-orange-900">{users.filter(u => u.role !== 'manager').length}人</div></div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
+        <h2 className="text-base font-semibold text-gray-900 mb-4">日別売上・経営指標</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs border-collapse">
+            <thead><tr className="bg-gray-50">
+              <th className="px-2 py-2 text-left font-medium text-gray-500 border-b">日</th>
+              <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">売上</th>
+              <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">前年</th>
+              <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">前年比</th>
+              <th className="px-2 py-2 text-center font-medium text-gray-500 border-b">操作</th>
+            </tr></thead>
+            <tbody>
+              {days.map(d => {
+                const ds = sales[d] || {};
+                const cur = ds.current || 0, prev = ds.prevYear || 0;
+                const ratio = prev > 0 ? ((cur - prev) / prev * 100).toFixed(1) : '-';
+                return (
+                  <tr key={d} className="border-b border-gray-100">
+                    <td className="px-2 py-2 font-medium text-gray-800">{d}日</td>
+                    <td className="px-2 py-2 text-right">
+                      {editingSales === d ? <input type="number" defaultValue={cur} onBlur={e => { setSales({ ...sales, [d]: { ...sales[d], current: parseInt(e.target.value) || 0 } }); }} className="w-20 px-1.5 py-1 border rounded text-right text-xs" /> : <span className="font-medium">¥{cur.toLocaleString()}</span>}
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      {editingSales === d ? <input type="number" defaultValue={prev} onBlur={e => { setSales({ ...sales, [d]: { ...sales[d], prevYear: parseInt(e.target.value) || 0 } }); }} className="w-20 px-1.5 py-1 border rounded text-right text-xs" /> : <span>¥{prev.toLocaleString()}</span>}
+                    </td>
+                    <td className="px-2 py-2 text-right">{typeof ratio === 'number' ? <span className={ratio >= 0 ? 'text-green-600' : 'text-red-600'}>{ratio >= 0 ? '+' : ''}{ratio}%</span> : <span className="text-gray-400">-</span>}</td>
+                    <td className="px-2 py-2 text-center">
+                      {editingSales === d ? <button onClick={() => handleSaveSales(d)} className="text-green-600 text-xs font-medium">保存</button> : <button onClick={() => setEditingSales(d)} className="text-blue-600 text-xs">編集</button>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 全スタッフシフト表（売上管理画面下部） */}
+      {isManager && (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <h2 className="text-sm font-semibold text-gray-900">部長提出用　シフト表</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 min-w-[80px]">氏名</th>
+                  {days.map(d => (
+                    <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[80px]">{d}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.filter(u => u.role !== 'manager').map((user, ri) => {
+                  const s = shifts[user.id]?.shifts || {};
+                  return (
+                    <tr key={user.id} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                      <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200" style={{ background: ri % 2 === 0 ? 'white' : 'rgb(249 250 251 / 0.5)' }}>{user.name}</td>
+                      {days.map(d => {
+                        const val = s[d];
+                        const isEmpty = !val || val === '/';
+                        const isRejected = val === '-';
+                        return (
+                          <td key={d} className={`px-1 py-1 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'}`}>
+                            {isEmpty && <span className="text-gray-300 text-sm font-light">/</span>}
+                            {isRejected && <span className="text-red-400 text-sm font-bold">-</span>}
+                            {!isEmpty && !isRejected && <span className="text-[9px] font-medium text-gray-700">{formatShiftForManager(val)}</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
