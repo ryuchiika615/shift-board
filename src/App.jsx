@@ -18,7 +18,6 @@ const save = (key, v) => {
 const groups = ['店長', 'キッチン', 'ホール'];
 const days = Array.from({ length: 15 }, (_, i) => i + 1);
 
-// 部長提出用の表記に変換
 function formatShiftForManager(val) {
   if (!val || val === '/' || val === '-') return val || '/';
   const parts = val.split('-');
@@ -44,6 +43,13 @@ function App() {
   const [approved, setApproved] = useState(() => load('sa', initialApproved));
   const [sales, setSales] = useState(() => load('ss', initialSales));
 
+  // NEW: 製麺アサイン / 午前不足/午後不足 / 売上昼ディナー
+  const [seimen, setSeimen] = useState(() => load('sm', {}));
+  const [shortageAM, setShortageAM] = useState(() => load('sham', {}));
+  const [shortagePM, setShortagePM] = useState(() => load('shpm', {}));
+  const [salesLunch, setSalesLunch] = useState(() => load('slu', {}));
+  const [salesDinner, setSalesDinner] = useState(() => load('sdi', {}));
+
   const [viewMode, setViewMode] = useState('employee');
   const [activeTab, setActiveTab] = useState('calendar');
   const [showUserModal, setShowUserModal] = useState(false);
@@ -57,6 +63,11 @@ function App() {
   useEffect(() => { save('sr', requests); }, [requests]);
   useEffect(() => { save('sa', approved); }, [approved]);
   useEffect(() => { save('ss', sales); }, [sales]);
+  useEffect(() => { save('sm', seimen); }, [seimen]);
+  useEffect(() => { save('sham', shortageAM); }, [shortageAM]);
+  useEffect(() => { save('shpm', shortagePM); }, [shortagePM]);
+  useEffect(() => { save('slu', salesLunch); }, [salesLunch]);
+  useEffect(() => { save('sdi', salesDinner); }, [salesDinner]);
 
   const usersByGroup = {};
   groups.forEach(g => { usersByGroup[g] = users.filter(u => u.group === g); });
@@ -138,7 +149,7 @@ function App() {
     const r = { ...requests }; delete r[`${currentUser.id}-${day}`]; setRequests(r);
   };
 
-  // ── 店長アクション: 採用/不採用 ──
+  // ── 店長アクション ──
   const handleCellClick = (userId, day) => {
     if (!isManager) return;
     const cellVal = shifts[userId]?.shifts?.[day];
@@ -195,7 +206,6 @@ function App() {
     return e - s;
   }, []);
 
-  // 社員（店長）の日別休憩時間を計算: 出勤日は1.5h
   const getManagerBreakHours = useCallback(() => {
     const manager = users.find(u => u.role === 'manager');
     if (!manager) return 0;
@@ -208,7 +218,6 @@ function App() {
     return breakDays * 1.5;
   }, [users, shifts]);
 
-  // 総勤務時間（社員休憩を差し引く前）
   const getDailyStatsRaw = useCallback((day) => {
     let h = 0, c = 0;
     Object.values(shifts).forEach(u => {
@@ -218,7 +227,6 @@ function App() {
     return { totalHours: h, staffCount: c };
   }, [shifts, calculateHours]);
 
-  // 総勤務時間（社員休憩差引後）
   const getDailyStats = useCallback((day) => {
     const raw = getDailyStatsRaw(day);
     const manager = users.find(u => u.role === 'manager');
@@ -243,7 +251,6 @@ function App() {
   const isManager = currentUser?.role === 'manager';
   const monthlyStats = currentUser ? getMonthlyStats() : { totalHours: 0, totalDays: 0, totalManagerBreak: 0 };
 
-  // 売上データからAp時間計、人時売上を計算
   const getDaySalesData = (day) => {
     const ds = sales[day] || {};
     const currentSales = ds.current || 0;
@@ -252,6 +259,10 @@ function App() {
     const laborSalesRatio = apHours > 0 ? currentSales / apHours : 0;
     return { sales: currentSales, apHours, laborSalesRatio };
   };
+
+  // キッチン・ホールの順序
+  const kitchenUsers = users.filter(u => u.group === 'キッチン');
+  const hallUsers = users.filter(u => u.group === 'ホール');
 
   // ── ログイン画面 ──
   if (!currentUser) {
@@ -264,7 +275,6 @@ function App() {
             <h1 className="text-2xl font-bold text-gray-900">シフト管理</h1>
             <p className="text-gray-500 text-sm mt-1">ログインしてください</p>
           </div>
-
           {loginStep === 'select' ? (
             <div className="space-y-4">
               <div>
@@ -336,14 +346,9 @@ function App() {
         </div>
       </header>
 
-      {isManager && viewMode === 'manager' && (
+      {isManager && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs text-amber-700">
-          <span className="font-medium">🔧 部長提出用ビュー</span> セルをクリックして採用・不採用を切り替えられます
-        </div>
-      )}
-      {isManager && viewMode === 'employee' && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-center text-xs text-amber-700">
-          <span className="font-medium">🔧 店長モード</span> 表のセルをクリックして採用・不採用を切り替えられます
+          <span className="font-medium">🔧 店長モード</span> 表のセルをクリックして採用・不採用、製麺・不足・売上を編集できます
         </div>
       )}
 
@@ -358,7 +363,6 @@ function App() {
           </>}
         </div>
 
-        {/* ── シフト表（スタッフ用 / 部長提出用） ── */}
         {activeTab === 'calendar' && (
           <ShiftTableView
             users={users}
@@ -371,6 +375,18 @@ function App() {
             getDaySalesData={getDaySalesData}
             handleCellClick={handleCellClick}
             formatShiftForManager={formatShiftForManager}
+            kitchenUsers={kitchenUsers}
+            hallUsers={hallUsers}
+            seimen={seimen}
+            setSeimen={setSeimen}
+            shortageAM={shortageAM}
+            setShortageAM={setShortageAM}
+            shortagePM={shortagePM}
+            setShortagePM={setShortagePM}
+            salesLunch={salesLunch}
+            setSalesLunch={setSalesLunch}
+            salesDinner={salesDinner}
+            setSalesDinner={setSalesDinner}
           />
         )}
 
@@ -435,9 +451,8 @@ function App() {
                     <div className="flex gap-2">
                       <button onClick={() => handleCellApprove(r.start, r.end)} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">採用</button>
                       <button onClick={() => {
-                        const u = users.find(uu => uu.id === r.userId);
-                        const s = shifts[u.id]?.shifts || {};
-                        setShifts({ ...shifts, [u.id]: { ...shifts[u.id], shifts: { ...s, [r.day]: '-' } } });
+                        const s = shifts[r.userId]?.shifts || {};
+                        setShifts({ ...shifts, [r.userId]: { ...shifts[r.userId], shifts: { ...s, [r.day]: '-' } } });
                         const rk = `${r.userId}-${r.day}-rejected`;
                         setApproved({ ...approved, [rk]: { userId: r.userId, day: r.day, shift: '-', rejectedAt: new Date().toISOString() } });
                         const nr = { ...requests }; delete nr[key]; setRequests(nr);
@@ -484,7 +499,7 @@ function App() {
         )}
 
         {/* ── 売上管理 ── */}
-            {activeTab === 'sales' && isManager && (
+        {activeTab === 'sales' && isManager && (
           <SalesView
             days={days}
             sales={sales}
@@ -499,6 +514,13 @@ function App() {
             isManager={isManager}
             shifts={shifts}
             formatShiftForManager={formatShiftForManager}
+            kitchenUsers={kitchenUsers}
+            hallUsers={hallUsers}
+            seimen={seimen}
+            shortageAM={shortageAM}
+            shortagePM={shortagePM}
+            salesLunch={salesLunch}
+            salesDinner={salesDinner}
           />
         )}
       </main>
@@ -555,23 +577,35 @@ function App() {
   );
 }
 
-// ── シフト表コンポーネント（スタッフ用 / 部長提出用） ──
-function ShiftTableView({ users, shifts, days, viewMode, isManager, sales, getDailyStats, getDaySalesData, handleCellClick, formatShiftForManager }) {
+// ── シフト表コンポーネント ──
+function ShiftTableView({
+  users, shifts, days, viewMode, isManager, sales,
+  getDailyStats, getDaySalesData, handleCellClick, formatShiftForManager,
+  kitchenUsers, hallUsers,
+  seimen, setSeimen,
+  shortageAM, setShortageAM,
+  shortagePM, setShortagePM,
+  salesLunch, setSalesLunch,
+  salesDinner, setSalesDinner,
+}) {
   const showManagerFormat = viewMode === 'manager';
+  const allStaff = users.filter(u => u.role !== 'manager');
+
+  // 店長
+  const managerUser = users.find(u => u.role === 'manager');
 
   return (
     <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
+      <div className="overflow-x-auto pb-2">
+        <table className="w-full border-collapse min-w-[700px]">
           <thead>
-            {/* KPI行（部長提出用のみ表示） */}
             {showManagerFormat && (
               <>
                 <tr className="bg-gray-50">
                   <th className="sticky left-0 z-10 bg-gray-50 px-2 py-1 text-left text-[9px] font-medium text-gray-400 border-b border-r border-gray-200 min-w-[80px]">売上予測</th>
                   {days.map(d => {
                     const { sales: s } = getDaySalesData(d);
-                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200 w-[52px]">{s > 0 ? `¥${(s / 1000).toFixed(0)}k` : '-'}</th>;
+                    return <th key={d} className="px-1 py-1 text-center text-[10px] font-medium text-gray-700 border-b border-r border-gray-200 w-[68px]">{s > 0 ? `¥${(s / 1000).toFixed(0)}k` : '-'}</th>;
                   })}
                 </tr>
                 <tr className="bg-gray-50">
@@ -590,69 +624,241 @@ function ShiftTableView({ users, shifts, days, viewMode, isManager, sales, getDa
                 </tr>
               </>
             )}
-            {/* 氏名・日付ヘッダー */}
             <tr className="bg-gray-50">
               <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase border-b border-r border-gray-200 min-w-[80px]">氏名</th>
               {days.map(d => (
-                <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[52px]">{d}</th>
+                <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[68px]">{d}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {users.filter(u => u.role !== 'manager' || isManager).map((user, ri) => {
-              const userShifts = shifts[user.id]?.shifts || {};
-              return (
-                <tr key={user.id} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 whitespace-nowrap" style={{ background: ri % 2 === 0 ? 'white' : 'rgb(249 250 251 / 0.5)' }}>
-                    {user.name}
-                    <span className="ml-1 text-[9px] text-gray-400">({user.group === '店長' ? '' : user.group === 'キッチン' ? 'K' : 'H'})</span>
-                  </td>
-                  {days.map(d => {
-                    const val = userShifts[d];
-                    const isEmpty = !val || val === '/';
-                    const isRejected = val === '-';
-                    const clickable = isManager;
-                    return (
-                      <td
-                        key={d}
-                        onClick={() => clickable && handleCellClick(user.id, d)}
-                        className={`px-0 py-0 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'} ${clickable ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
-                        style={{ height: showManagerFormat ? '36px' : '40px' }}
+            {/* ── 店長行 ── */}
+            {managerUser && <StaffRow user={managerUser} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} formatShiftForManager={formatShiftForManager} showManagerFormat={showManagerFormat} />}
+
+            {/* ── キッチングループ ── */}
+            <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">キッチン</td></tr>
+            {kitchenUsers.map(u => (
+              <StaffRow key={u.id} user={u} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} formatShiftForManager={formatShiftForManager} showManagerFormat={showManagerFormat} />
+            ))}
+
+            {/* ── 製麺行 ── */}
+            <tr className="bg-indigo-50">
+              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-indigo-700 border-b border-r border-gray-200 whitespace-nowrap bg-indigo-50">
+                🍜 製麺
+              </td>
+              {days.map(d => {
+                const val = seimen[d] || '';
+                return (
+                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
+                    {isManager ? (
+                      <select
+                        value={val}
+                        onChange={e => setSeimen({ ...seimen, [d]: e.target.value })}
+                        className="w-full text-[10px] px-1 py-1 border border-indigo-300 rounded bg-white"
                       >
-                        {isEmpty && <span className="text-gray-300 text-lg font-light leading-none">/</span>}
-                        {isRejected && <span className="text-red-400 text-lg font-bold leading-none">-</span>}
-                        {!isEmpty && !isRejected && (
-                          showManagerFormat ? (
-                            <span className="text-[9px] font-medium text-gray-700 leading-tight">{formatShiftForManager(val)}</span>
-                          ) : (
-                            <div className="flex flex-col items-center leading-tight py-0.5">
-                              <span className="text-[11px] font-bold text-gray-800">{val.split('-')[0]}</span>
-                              <span className="text-[8px] text-gray-400 leading-[10px]">─</span>
-                              <span className="text-[11px] font-bold text-gray-800">{val.split('-')[1]}</span>
-                            </div>
-                          )
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+                        <option value="">-</option>
+                        {allStaff.map(u => (
+                          <option key={u.id} value={u.name}>{u.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs font-medium text-indigo-700">{val || '/'}</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+
+            {/* ── 午前不足 ── */}
+            <tr className="bg-red-50">
+              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-red-700 border-b border-r border-gray-200 whitespace-nowrap bg-red-50">
+                ☀ 午前不足
+              </td>
+              {days.map(d => {
+                const val = shortageAM[d];
+                return (
+                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
+                    {isManager ? (
+                      <input
+                        type="number"
+                        value={val ?? ''}
+                        onChange={e => setShortageAM({ ...shortageAM, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })}
+                        className="w-full text-[11px] px-1 py-1 border border-red-300 rounded bg-red-50 text-red-700 text-center font-bold"
+                        placeholder="0"
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-red-600">{val != null ? val : '-'}</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+
+            {/* ── 午後不足 ── */}
+            <tr className="bg-orange-50">
+              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-orange-700 border-b border-r border-gray-200 whitespace-nowrap bg-orange-50">
+                🌅 午後不足
+              </td>
+              {days.map(d => {
+                const val = shortagePM[d];
+                return (
+                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
+                    {isManager ? (
+                      <input
+                        type="number"
+                        value={val ?? ''}
+                        onChange={e => setShortagePM({ ...shortagePM, [d]: e.target.value === '' ? undefined : parseInt(e.target.value) })}
+                        className="w-full text-[11px] px-1 py-1 border border-orange-300 rounded bg-orange-50 text-orange-700 text-center font-bold"
+                        placeholder="0"
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-orange-600">{val != null ? val : '-'}</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+
+            {/* ── ホールグループ ── */}
+            <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">ホール</td></tr>
+            {hallUsers.map(u => (
+              <StaffRow key={u.id} user={u} shifts={shifts} days={days} isManager={isManager} handleCellClick={handleCellClick} formatShiftForManager={formatShiftForManager} showManagerFormat={showManagerFormat} />
+            ))}
+
+            {/* ── 売上 昼 ── */}
+            <tr className="bg-cyan-50">
+              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-cyan-700 border-b border-r border-gray-200 whitespace-nowrap bg-cyan-50">
+                💰 売上 昼
+              </td>
+              {days.map(d => {
+                const val = salesLunch[d] || { main: '', sub: '' };
+                return (
+                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
+                    {isManager ? (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <input
+                          type="number"
+                          value={val.main}
+                          onChange={e => setSalesLunch({ ...salesLunch, [d]: { ...val, main: e.target.value } })}
+                          className="w-full text-[10px] px-1 py-0.5 border border-cyan-300 rounded bg-white text-center font-medium"
+                          placeholder="予測"
+                        />
+                        <input
+                          type="number"
+                          value={val.sub}
+                          onChange={e => setSalesLunch({ ...salesLunch, [d]: { ...val, sub: e.target.value } })}
+                          className="w-full text-[10px] px-1 py-0.5 border border-cyan-300 rounded bg-white text-center text-gray-500"
+                          placeholder="(実績)"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-xs font-medium text-cyan-700">
+                        {val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}
+                      </span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+
+            {/* ── 売上 ディナー ── */}
+            <tr className="bg-blue-50">
+              <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-blue-700 border-b border-r border-gray-200 whitespace-nowrap bg-blue-50">
+                🌙 売上 ディナー
+              </td>
+              {days.map(d => {
+                const val = salesDinner[d] || { main: '', sub: '' };
+                return (
+                  <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200">
+                    {isManager ? (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <input
+                          type="number"
+                          value={val.main}
+                          onChange={e => setSalesDinner({ ...salesDinner, [d]: { ...val, main: e.target.value } })}
+                          className="w-full text-[10px] px-1 py-0.5 border border-blue-300 rounded bg-white text-center font-medium"
+                          placeholder="予測"
+                        />
+                        <input
+                          type="number"
+                          value={val.sub}
+                          onChange={e => setSalesDinner({ ...salesDinner, [d]: { ...val, sub: e.target.value } })}
+                          className="w-full text-[10px] px-1 py-0.5 border border-blue-300 rounded bg-white text-center text-gray-500"
+                          placeholder="(実績)"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-xs font-medium text-blue-700">
+                        {val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}
+                      </span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
           </tbody>
         </table>
       </div>
       <div className="px-3 py-2 border-t border-gray-200 text-[10px] text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
         <span><span className="text-gray-300 text-sm font-light">/</span> = 未提出</span>
         <span><span className="text-red-400 font-bold">-</span> = 不採用</span>
-        <span className="text-blue-600 font-bold">09─22</span> = 採用
+        <span><span className="text-blue-600 font-bold">09─22</span> = 採用</span>
         {showManagerFormat && <span className="text-green-700">L=ランチ D=ディナー</span>}
       </div>
     </div>
   );
 }
 
-// ── 売上管理コンポーネント ──
-function SalesView({ days, sales, setSales, editingSales, setEditingSales, handleSaveSales, monthlyStats, getManagerBreakHours, getMonthlyStats, users, isManager, shifts, formatShiftForManager }) {
+// ── スタッフ1行 ──
+function StaffRow({ user, shifts, days, isManager, handleCellClick, formatShiftForManager, showManagerFormat }) {
+  const userShifts = shifts[user.id]?.shifts || {};
+  return (
+    <tr className="bg-white border-b border-gray-100">
+      <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 whitespace-nowrap bg-white">
+        {user.name}
+        <span className="ml-1 text-[9px] text-gray-400">({user.group === '店長' ? '' : user.group === 'キッチン' ? 'K' : 'H'})</span>
+      </td>
+      {days.map(d => {
+        const val = userShifts[d];
+        const isEmpty = !val || val === '/';
+        const isRejected = val === '-';
+        return (
+          <td
+            key={d}
+            onClick={() => isManager && handleCellClick(user.id, d)}
+            className={`px-0 py-0 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'} ${isManager ? 'cursor-pointer hover:ring-2 hover:ring-inset hover:ring-blue-300' : ''}`}
+            style={{ height: '32px' }}
+          >
+            {isEmpty && <span className="text-gray-300 text-sm font-light leading-none">/</span>}
+            {isRejected && <span className="text-red-400 text-sm font-bold leading-none">-</span>}
+            {!isEmpty && !isRejected && (
+              showManagerFormat ? (
+                <span className="text-[9px] font-medium text-gray-700 leading-tight">{formatShiftForManager(val)}</span>
+              ) : (
+                <div className="flex flex-col items-center leading-tight py-0.5">
+                  <span className="text-[11px] font-bold text-gray-800">{val.split('-')[0]}</span>
+                  <span className="text-[8px] text-gray-400 leading-[10px]">─</span>
+                  <span className="text-[11px] font-bold text-gray-800">{val.split('-')[1]}</span>
+                </div>
+              )
+            )}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+// ── 売上管理 ──
+function SalesView({
+  days, sales, setSales, editingSales, setEditingSales, handleSaveSales,
+  monthlyStats, getManagerBreakHours, getMonthlyStats, users, isManager,
+  shifts, formatShiftForManager, kitchenUsers, hallUsers,
+  seimen, shortageAM, shortagePM, salesLunch, salesDinner
+}) {
+  const managerUser = users.find(u => u.role === 'manager');
+  const allStaff = users.filter(u => u.role !== 'manager');
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
@@ -669,7 +875,7 @@ function SalesView({ days, sales, setSales, editingSales, setEditingSales, handl
       <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
         <h2 className="text-base font-semibold text-gray-900 mb-4">日別売上・経営指標</h2>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse">
+          <table className="w-full text-xs border-collapse min-w-[500px]">
             <thead><tr className="bg-gray-50">
               <th className="px-2 py-2 text-left font-medium text-gray-500 border-b">日</th>
               <th className="px-2 py-2 text-right font-medium text-gray-500 border-b">売上</th>
@@ -703,49 +909,83 @@ function SalesView({ days, sales, setSales, editingSales, setEditingSales, handl
         </div>
       </div>
 
-      {/* 全スタッフシフト表（売上管理画面下部） */}
       {isManager && (
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200">
-            <h2 className="text-sm font-semibold text-gray-900">部長提出用　シフト表</h2>
+            <h2 className="text-sm font-semibold text-gray-900">部長提出用 シフト表</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
+            <table className="w-full border-collapse min-w-[700px]">
               <thead>
                 <tr className="bg-gray-50">
                   <th className="sticky left-0 z-10 bg-gray-50 px-2 py-2 text-left text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 min-w-[80px]">氏名</th>
                   {days.map(d => (
-                    <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[80px]">{d}</th>
+                    <th key={d} className="px-1 py-2 text-center text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 w-[68px]">{d}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {users.filter(u => u.role !== 'manager').map((user, ri) => {
-                  const s = shifts[user.id]?.shifts || {};
-                  return (
-                    <tr key={user.id} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                      <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200" style={{ background: ri % 2 === 0 ? 'white' : 'rgb(249 250 251 / 0.5)' }}>{user.name}</td>
-                      {days.map(d => {
-                        const val = s[d];
-                        const isEmpty = !val || val === '/';
-                        const isRejected = val === '-';
-                        return (
-                          <td key={d} className={`px-1 py-1 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'}`}>
-                            {isEmpty && <span className="text-gray-300 text-sm font-light">/</span>}
-                            {isRejected && <span className="text-red-400 text-sm font-bold">-</span>}
-                            {!isEmpty && !isRejected && <span className="text-[9px] font-medium text-gray-700">{formatShiftForManager(val)}</span>}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
+                {managerUser && <SalesStaffRow user={managerUser} shifts={shifts} days={days} formatShiftForManager={formatShiftForManager} />}
+                <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">キッチン</td></tr>
+                {kitchenUsers.map(u => <SalesStaffRow key={u.id} user={u} shifts={shifts} days={days} formatShiftForManager={formatShiftForManager} />)}
+                <tr className="bg-indigo-50">
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-indigo-700 border-b border-r border-gray-200 bg-indigo-50">🍜 製麺</td>
+                  {days.map(d => {
+                    const val = seimen[d] || '';
+                    return <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-medium text-indigo-700">{val || '/'}</td>;
+                  })}
+                </tr>
+                <tr className="bg-red-50">
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-red-700 border-b border-r border-gray-200 bg-red-50">☀ 午前不足</td>
+                  {days.map(d => <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-bold text-red-600">{shortageAM[d] != null ? shortageAM[d] : '-'}</td>)}
+                </tr>
+                <tr className="bg-orange-50">
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-orange-700 border-b border-r border-gray-200 bg-orange-50">🌅 午後不足</td>
+                  {days.map(d => <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-bold text-orange-600">{shortagePM[d] != null ? shortagePM[d] : '-'}</td>)}
+                </tr>
+                <tr><td colSpan={days.length + 1} className="px-2 py-1 text-[9px] font-bold text-gray-500 bg-gray-100 border-b border-r border-gray-200">ホール</td></tr>
+                {hallUsers.map(u => <SalesStaffRow key={u.id} user={u} shifts={shifts} days={days} formatShiftForManager={formatShiftForManager} />)}
+                <tr className="bg-cyan-50">
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-cyan-700 border-b border-r border-gray-200 bg-cyan-50">💰 売上 昼</td>
+                  {days.map(d => {
+                    const val = salesLunch[d] || {};
+                    return <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-medium text-cyan-700">{val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}</td>;
+                  })}
+                </tr>
+                <tr className="bg-blue-50">
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-bold text-blue-700 border-b border-r border-gray-200 bg-blue-50">🌙 売上 ディナー</td>
+                  {days.map(d => {
+                    const val = salesDinner[d] || {};
+                    return <td key={d} className="px-1 py-1 text-center border-b border-r border-gray-200 text-xs font-medium text-blue-700">{val.main ? `${val.main}` : '-'}{val.sub ? ` (${val.sub})` : ''}</td>;
+                  })}
+                </tr>
               </tbody>
             </table>
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function SalesStaffRow({ user, shifts, days, formatShiftForManager }) {
+  const s = shifts[user.id]?.shifts || {};
+  return (
+    <tr className="bg-white border-b border-gray-100">
+      <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium text-gray-700 border-b border-r border-gray-200 bg-white">{user.name}</td>
+      {days.map(d => {
+        const val = s[d];
+        const isEmpty = !val || val === '/';
+        const isRejected = val === '-';
+        return (
+          <td key={d} className={`px-1 py-1 text-center border-b border-r border-gray-200 ${isEmpty ? 'bg-white' : isRejected ? 'bg-red-50' : 'bg-blue-50'}`}>
+            {isEmpty && <span className="text-gray-300 text-sm font-light">/</span>}
+            {isRejected && <span className="text-red-400 text-sm font-bold">-</span>}
+            {!isEmpty && !isRejected && <span className="text-[9px] font-medium text-gray-700">{formatShiftForManager(val)}</span>}
+          </td>
+        );
+      })}
+    </tr>
   );
 }
 
