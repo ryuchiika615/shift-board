@@ -968,25 +968,31 @@ def get_current_period():
 def webhook():
     """LINE Webhookエンドポイント"""
     if not LINE_CHANNEL_SECRET:
-        return jsonify({'error': 'LINE not configured'}), 503
+        return 'OK'
     
     signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
     
     if not verify_line_signature(body, signature):
-        abort(400)
+        return 'OK'
     
-    data = json.loads(body)
-    
-    for event in data.get('events', []):
-        event_type = event.get('type')
+    try:
+        data = json.loads(body)
         
-        if event_type == 'message' and event.get('message', {}).get('type') == 'text':
-            handle_line_message(event)
-        elif event_type == 'follow':
-            handle_line_follow(event)
-        elif event_type == 'join':
-            handle_line_join(event)
+        for event in data.get('events', []):
+            event_type = event.get('type')
+            
+            try:
+                if event_type == 'message' and event.get('message', {}).get('type') == 'text':
+                    handle_line_message(event)
+                elif event_type == 'follow':
+                    handle_line_follow(event)
+                elif event_type == 'join':
+                    handle_line_join(event)
+            except Exception as e:
+                print(f'Event handler error: {e}')
+    except Exception as e:
+        print(f'Webhook error: {e}')
     
     return 'OK'
 
@@ -1022,17 +1028,27 @@ def handle_line_message(event):
     message_text = event['message']['text']
     reply_token = event['replyToken']
     
+    # データベース初期化を確認
+    try:
+        init_db()
+    except:
+        pass
+    
     # ユーザープロフィールを取得
     profile = get_line_profile(user_id)
     display_name = profile.get('displayName', user_id)
     
     # データベースにメッセージを保存
-    msg = LineMessage(
-        raw_message=message_text,
-        received_at=datetime.now()
-    )
-    db.session.add(msg)
-    db.session.commit()
+    try:
+        msg = LineMessage(
+            raw_message=message_text,
+            received_at=datetime.now()
+        )
+        db.session.add(msg)
+        db.session.commit()
+    except Exception as e:
+        print(f'DB save error: {e}')
+        db.session.rollback()
     
     # 出勤可能日を解析
     parsed = parse_availability_message(message_text, display_name)

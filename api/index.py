@@ -8,7 +8,9 @@ os.chdir(parent_dir)
 
 from app import app, init_db
 
-init_db()
+# Initialize database
+with app.app_context():
+    init_db()
 
 # Vercel WSGI handler
 def handler(environ, start_response):
