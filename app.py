@@ -11,9 +11,9 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = 'shift-board-secret-key-2026'
+app.secret_key = os.environ.get('SECRET_KEY', 'shift-board-secret-key-2026')
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "shift.db")}'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', f'sqlite:///{os.path.join(basedir, "shift.db")}')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # LINE Bot設定（LINE Developer Consoleから取得）
