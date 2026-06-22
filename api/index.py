@@ -1,13 +1,15 @@
 import sys
 import os
 
-# Add the parent directory to the path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+os.chdir(parent_dir)
 
 from app import app, init_db
 
-# Initialize database
 init_db()
 
-# Vercel expects this
-application = app
+# Vercel WSGI handler
+def handler(environ, start_response):
+    return app(environ, start_response)
