@@ -1054,13 +1054,6 @@ def handle_line_message(event):
     except Exception as e:
         print(f'Message handler error: {e}')
         reply_to_line(reply_token, f'{display_name}さん、承知しました！\n出勤可能日を受け付けました。')
-        else:
-            reply = '現在、シフト期間が設定されていません。'
-    else:
-        reply = 'メッセージを解析できませんでした。\n'
-        reply += '例：「1日 10-15」「1日○」'
-    
-    reply_to_line(reply_token, reply)
 
 
 @app.route('/manager/line/link', methods=['POST'])
