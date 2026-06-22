@@ -13,7 +13,17 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'shift-board-secret-key-2026')
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', f'sqlite:///{os.path.join(basedir, "shift.db")}')
+
+# Vercelでは/tmpに保存、ローカルではshift.db
+db_path = os.environ.get('DATABASE_URL', '')
+if not db_path:
+    import tempfile
+    if os.path.exists('/tmp'):
+        db_path = 'sqlite:///' + os.path.join('/tmp', 'shift.db')
+    else:
+        db_path = f'sqlite:///{os.path.join(basedir, "shift.db")}'
+
+app.config['SQLALCHEMY_DATABASE_URI'] = db_path
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # LINE Bot設定（LINE Developer Consoleから取得）
