@@ -26,20 +26,13 @@ if not database_url:
 if 'sqlite' in database_url:
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 else:
-    # Supabase: URLから個別パラメータに分解（!などの特殊文字対策）
     import re
     m = re.match(r'postgres(?:ql)?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', database_url)
     if m:
         user, password, host, port, dbname = m.groups()
-        app.config['SQLALCHEMY_DATABASE_URI'] = \
-            f'postgresql+psycopg2://{user}@{host}:{port}/{dbname}'
-        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-            'connect_args': {
-                'password': password,
-                'sslmode': 'require',
-                'connect_timeout': 10,
-            }
-        }
+        from urllib.parse import quote
+        db_url = f'postgresql://{user}:{quote(password, safe="")}@{host}:{port}/{dbname}?sslmode=require&connect_timeout=10'
+        app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     else:
         app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 
