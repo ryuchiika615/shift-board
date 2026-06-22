@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}売上データ - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="sales-editor">
+    <div class="editor-header">
+        <h1>{{ period.year }}年{{ period.month }}月 {% if period.half == 1 %}前半{% else %}後半{% endif %} 売上データ</h1>
+        <a href="{{ url_for('manager_dashboard') }}" class="btn btn-secondary">戻る</a>
+    </div>
+
+    <!-- 統計サマリー -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">売上予測合計</div>
+            <div class="stat-value">¥{{ "{:,}".format(stats.total_forecast) }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">前年売上合計</div>
+            <div class="stat-value">¥{{ "{:,}".format(stats.total_last_year) }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">前年比</div>
+            <div class="stat-value {% if stats.yoy_ratio >= 100 %}text-success{% else %}text-danger{% endif %}">{{ stats.yoy_ratio }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">人時売上</div>
+            <div class="stat-value">¥{{ "{:,}".format|int(stats.people_hour_sales) }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">労働時間</div>
+            <div class="stat-value">{{ labor.total_hours }}h</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">アルバイト時間</div>
+            <div class="stat-value">{{ labor.ap_hours }}h</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">平均時給</div>
+            <div class="stat-value">¥{{ "{:,}".format(stats.ap_avg_wage) }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">変動費（人件費）</div>
+            <div class="stat-value">¥{{ "{:,}".format(stats.labor_cost) }}</div>
+        </div>
+    </div>
+
+    <!-- 日別データ入力 -->
+    <div class="section">
+        <h2>日別売上データ</h2>
+        <div class="table-container">
+            <table class="data-table sales-table">
+                <thead>
+                    <tr>
+                        <th>日付</th>
+                        <th>曜日</th>
+                        <th>売上予測</th>
+                        <th>前年売上</th>
+                        <th>前年ランチ売上</th>
+                        <th>前年ディナー売上</th>
+                        <th>今期ランチ売上</th>
+                        <th>今期ディナー売上</th>
+                        <th>実績</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in dates %}
+                    {% set sale = sales_data.get(d) %}
+                    <tr data-date="{{ d.isoformat() }}" data-period-id="{{ period.id }}">
+                        <td>{{ d.month }}/{{ d.day }}</td>
+                        <td class="{% if d.weekday() >= 5 %}weekend{% endif %}">{{ get_day_name(d) }}</td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="sales_forecast"
+                                   value="{{ sale.sales_forecast if sale else '' }}" placeholder="0">
+                        </td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="last_year_sales"
+                                   value="{{ sale.last_year_sales if sale else '' }}" placeholder="0">
+                        </td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="last_year_lunch"
+                                   value="{{ sale.last_year_lunch if sale else '' }}" placeholder="0">
+                        </td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="last_year_dinner"
+                                   value="{{ sale.last_year_dinner if sale else '' }}" placeholder="0">
+                        </td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="lunch_sales"
+                                   value="{{ sale.lunch_sales if sale else '' }}" placeholder="0">
+                        </td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="dinner_sales"
+                                   value="{{ sale.dinner_sales if sale else '' }}" placeholder="0">
+                        </td>
+                        <td>
+                            <input type="number" class="sales-input" data-field="actual_sales"
+                                   value="{{ sale.actual_sales if sale else '' }}" placeholder="0">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('.sales-input').forEach(input => {
+    input.addEventListener('change', function() {
+        const row = this.closest('tr');
+        const date = row.dataset.date;
+        const periodId = row.dataset.periodId;
+        const field = this.dataset.field;
+        const value = this.value || 0;
+
+        fetch('/manager/sales/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: date,
+                period_id: parseInt(periodId),
+                [field]: parseInt(value)
+            })
+        });
+    });
+});
+</script>
+{% endblock %}

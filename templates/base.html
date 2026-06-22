@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}松戸店 シフト管理{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="{{ url_for('index') }}">松戸店 シフト管理</a>
+        </div>
+        <div class="nav-menu">
+            {% if session.get('user_role') == 'manager' %}
+                <a href="{{ url_for('manager_dashboard') }}" class="nav-link">ダッシュボード</a>
+                <a href="{{ url_for('manage_employees') }}" class="nav-link">従業員管理</a>
+                <a href="{{ url_for('line_monitor') }}" class="nav-link">LINE監視</a>
+            {% elif session.get('user_id') %}
+                <a href="{{ url_for('staff_view') }}" class="nav-link">マイページ</a>
+            {% endif %}
+            {% if session.get('user_name') %}
+                <span class="nav-user">{{ session.get('user_name') }}</span>
+                <a href="{{ url_for('logout') }}" class="nav-link nav-logout">ログアウト</a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main class="container">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="flash-message">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}従業員管理 - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="employees-page">
+    <div class="page-header">
+        <h1>従業員管理</h1>
+        <button class="btn btn-primary" onclick="document.getElementById('addEmployeeModal').style.display='flex'">
+            従業員追加
+        </button>
+    </div>
+
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>名前</th>
+                    <th>役職</th>
+                    <th>時給</th>
+                    <th>高校生</th>
+                    <th>週最大時間</th>
+                    <th>日最大時間</th>
+                    <th>退勤時刻制限</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for emp in employees %}
+                <tr>
+                    <td><strong>{{ emp.name }}</strong></td>
+                    <td>
+                        {% if emp.role == 'manager' %}店長
+                        {% elif emp.role == 'fulltime' %}社員
+                        {% else %}アルバイト{% endif %}
+                    </td>
+                    <td>¥{{ "{:,}".format(emp.hourly_wage) }}</td>
+                    <td>{% if emp.is_highschool %}<span class="badge badge-warning">○</span>{% else %}-{% endif %}</td>
+                    <td>{{ emp.max_weekly_hours }}h</td>
+                    <td>{{ emp.max_daily_hours }}h</td>
+                    <td>{{ emp.max_end_time }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline" onclick="editEmployee('{{ emp.id }}', '{{ emp.name }}', '{{ emp.role }}', {{ emp.hourly_wage }}, {{ emp.is_highschool|lower }}, {{ emp.max_weekly_hours }}, {{ emp.max_daily_hours }}, '{{ emp.max_end_time }}')">
+                            編集
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 従業員追加モーダル -->
+<div id="addEmployeeModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>従業員追加</h2>
+            <button class="modal-close" onclick="document.getElementById('addEmployeeModal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('add_employee') }}">
+            <div class="form-group">
+                <label for="name">名前</label>
+                <input type="text" id="name" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="password">パスワード</label>
+                <input type="password" id="password" name="password" placeholder="パスワードを設定">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="role">役職</label>
+                    <select name="role" id="role">
+                        <option value="parttime">アルバイト</option>
+                        <option value="fulltime">社員</option>
+                        <option value="manager">店長</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="hourly_wage">時給</label>
+                    <input type="number" name="hourly_wage" id="hourly_wage" value="1100">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="is_highschool"> 高校生
+                    </label>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="max_weekly_hours">週最大時間</label>
+                    <input type="number" name="max_weekly_hours" id="max_weekly_hours" value="28">
+                </div>
+                <div class="form-group">
+                    <label for="max_daily_hours">日最大時間</label>
+                    <input type="number" name="max_daily_hours" id="max_daily_hours" value="8">
+                </div>
+                <div class="form-group">
+                    <label for="max_end_time">退勤時刻制限</label>
+                    <input type="time" name="max_end_time" id="max_end_time" value="22:00">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('addEmployeeModal').style.display='none'">キャンセル</button>
+                <button type="submit" class="btn btn-primary">追加</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 従業員編集モーダル -->
+<div id="editEmployeeModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>従業員編集</h2>
+            <button class="modal-close" onclick="document.getElementById('editEmployeeModal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('update_employee') }}">
+            <input type="hidden" id="edit_id" name="id">
+            <div class="form-group">
+                <label for="edit_name">名前</label>
+                <input type="text" id="edit_name" name="name" required>
+            </div>
+            <div class="form-group">
+                <label for="edit_password">パスワード（変更する場合のみ入力）</label>
+                <input type="password" id="edit_password" name="password" placeholder="変更しない場合は空白">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit_role">役職</label>
+                    <select name="role" id="edit_role">
+                        <option value="parttime">アルバイト</option>
+                        <option value="fulltime">社員</option>
+                        <option value="manager">店長</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="edit_hourly_wage">時給</label>
+                    <input type="number" name="hourly_wage" id="edit_hourly_wage">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" name="is_highschool" id="edit_is_highschool"> 高校生
+                    </label>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit_max_weekly_hours">週最大時間</label>
+                    <input type="number" name="max_weekly_hours" id="edit_max_weekly_hours">
+                </div>
+                <div class="form-group">
+                    <label for="edit_max_daily_hours">日最大時間</label>
+                    <input type="number" name="max_daily_hours" id="edit_max_daily_hours">
+                </div>
+                <div class="form-group">
+                    <label for="edit_max_end_time">退勤時刻制限</label>
+                    <input type="time" name="max_end_time" id="edit_max_end_time">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('editEmployeeModal').style.display='none'">キャンセル</button>
+                <button type="submit" class="btn btn-primary">更新</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function editEmployee(id, name, role, wage, isHS, maxWeekly, maxDaily, maxEnd) {
+    document.getElementById('edit_id').value = id;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_role').value = role;
+    document.getElementById('edit_hourly_wage').value = wage;
+    document.getElementById('edit_is_highschool').checked = isHS;
+    document.getElementById('edit_max_weekly_hours').value = maxWeekly;
+    document.getElementById('edit_max_daily_hours').value = maxDaily;
+    document.getElementById('edit_max_end_time').value = maxEnd;
+    document.getElementById('editEmployeeModal').style.display = 'flex';
+}
+</script>
+{% endblock %}

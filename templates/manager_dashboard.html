@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}店長ダッシュボード - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="dashboard">
+    <div class="dashboard-header">
+        <h1>店長ダッシュボード</h1>
+        <p>松戸店 シフト管理システム</p>
+    </div>
+
+    <div class="section">
+        <div class="section-header">
+            <h2>シフト期間</h2>
+            <button class="btn btn-primary" onclick="document.getElementById('createPeriodModal').style.display='flex'">
+                新規期間作成
+            </button>
+        </div>
+
+        <div class="period-list">
+            {% for period in periods %}
+            <div class="period-card {% if current_period and period.id == current_period.id %}active{% endif %}">
+                <div class="period-info">
+                    <h3>{{ period.year }}年{{ period.month }}月 {% if period.half == 1 %}前半{% else %}後半{% endif %}</h3>
+                    <p>{{ period.start_date.strftime('%m/%d') }} 〜 {{ period.end_date.strftime('%m/%d') }}</p>
+                    <span class="badge {% if period.is_published %}badge-success{% else %}badge-warning{% endif %}">
+                        {% if period.is_published %}公開済み{% else %}作成中{% endif %}
+                    </span>
+                </div>
+                <div class="period-actions">
+                    <a href="{{ url_for('shift_editor', period_id=period.id) }}" class="btn btn-primary">シフト編集</a>
+                    <a href="{{ url_for('sales_editor', period_id=period.id) }}" class="btn btn-secondary">売上データ</a>
+                    <a href="{{ url_for('report_view', period_id=period.id) }}" class="btn btn-outline">部長用レポート</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if current_period %}
+    <div class="section">
+        <h2>現在の期間サマリー</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">売上予測</div>
+                <div class="stat-value">¥{{ "{:,}".format(current_period.sales_data | sum(attribute='sales_forecast') if current_period.sales_data else 0) }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">労働時間合計</div>
+                <div class="stat-value">--時間</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">アルバイト時間</div>
+                <div class="stat-value">--時間</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">人時売上</div>
+                <div class="stat-value">¥--</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<div id="createPeriodModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>新規シフト期間作成</h2>
+            <button class="modal-close" onclick="document.getElementById('createPeriodModal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('create_period') }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="year">年</label>
+                    <select name="year" id="year" required>
+                        {% for y in range(2025, 2030) %}
+                        <option value="{{ y }}" {% if y == today.year %}selected{% endif %}>{{ y }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="month">月</label>
+                    <select name="month" id="month" required>
+                        {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == today.month %}selected{% endif %}>{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="half">期間</label>
+                    <select name="half" id="half" required>
+                        <option value="1">前半 (1日〜15日)</option>
+                        <option value="2">後半 (16日〜末日)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('createPeriodModal').style.display='none'">キャンセル</button>
+                <button type="submit" class="btn btn-primary">作成</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

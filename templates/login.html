@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}ログイン - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="login-container">
+    <div class="login-box">
+        <h1>松戸店 シフト管理</h1>
+        <p class="login-subtitle">ログインしてください</p>
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <label for="name">名前</label>
+                <select name="name" id="name" required>
+                    <option value="">選択してください</option>
+                    <option value="店長">店長</option>
+                    <option value="森">森</option>
+                    <option value="西村(優)">西村(優)</option>
+                    <option value="西村(海)">西村(海)</option>
+                    <option value="玉置">玉置</option>
+                    <option value="河原">河原</option>
+                    <option value="杉田">杉田</option>
+                    <option value="熊澤">熊澤</option>
+                    <option value="渡辺">渡辺</option>
+                    <option value="安部">安部</option>
+                    <option value="北川">北川</option>
+                    <option value="本橋">本橋</option>
+                    <option value="早川">早川</option>
+                    <option value="工藤">工藤</option>
+                    <option value="小林">小林</option>
+                    <option value="関口">関口</option>
+                    <option value="山田">山田</option>
+                    <option value="水本">水本</option>
+                    <option value="藤野">藤野</option>
+                    <option value="浅海">浅海</option>
+                    <option value="玉川">玉川</option>
+                    <option value="小林(芽)">小林(芽)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="password">パスワード</label>
+                <input type="password" id="password" name="password" placeholder="パスワードを入力">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">ログイン</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}マイページ - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="staff-page">
+    <div class="page-header">
+        <h1>こんにちは、{{ user.name }}さん</h1>
+        <p>
+            {% if user.role == 'manager' %}店長
+            {% elif user.role == 'fulltime' %}社員
+            {% else %}アルバイト{% endif %}
+        </p>
+    </div>
+
+    <div class="section">
+        <h2>シフト期間</h2>
+        <div class="period-list">
+            {% for period in periods %}
+            <div class="period-card">
+                <div class="period-info">
+                    <h3>{{ period.year }}年{{ period.month }}月 {% if period.half == 1 %}前半{% else %}後半{% endif %}</h3>
+                    <p>{{ period.start_date.strftime('%m/%d') }} 〜 {{ period.end_date.strftime('%m/%d') }}</p>
+                    <span class="badge {% if period.is_published %}badge-success{% else %}badge-warning{% endif %}">
+                        {% if period.is_published %}公開済み{% else %}作成中{% endif %}
+                    </span>
+                </div>
+                <div class="period-actions">
+                    <a href="{{ url_for('availability_input', period_id=period.id) }}" class="btn btn-primary">出勤可能日を入力</a>
+                    <a href="{{ url_for('staff_schedule', period_id=period.id) }}" class="btn btn-outline">シフトを確認</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

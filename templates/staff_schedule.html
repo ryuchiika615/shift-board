@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}シフト確認 - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="staff-schedule">
+    <div class="page-header">
+        <h1>シフト確認</h1>
+        <p>{{ period.year }}年{{ period.month }}月 {% if period.half == 1 %}前半{% else %}後半{% endif %}</p>
+        <a href="{{ url_for('staff_view') }}" class="btn btn-secondary">戻る</a>
+    </div>
+
+    {% if period.is_published %}
+    <div class="schedule-grid">
+        {% for d in dates %}
+        {% set shift = my_shifts.get(d) %}
+        <div class="schedule-card {% if shift %}has-shift{% endif %} {% if d.weekday() >= 5 %}weekend{% endif %}">
+            <div class="card-date">
+                <span class="date-num">{{ d.day }}</span>
+                <span class="date-weekday">{{ get_day_name(d) }}</span>
+            </div>
+            <div class="card-shift">
+                {% if shift %}
+                    <div class="shift-time">{{ shift.start_time }} - {{ shift.end_time }}</div>
+                    <div class="shift-type">{{ shift.shift_type }}</div>
+                    {% if shift.area %}<div class="shift-area">{{ shift.area }}</div>{% endif %}
+                    <div class="shift-break">休憩: {{ shift.break_minutes }}分</div>
+                {% else %}
+                    <div class="no-shift">休み</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="notice">
+        <p>シフトはまだ公開されていません</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

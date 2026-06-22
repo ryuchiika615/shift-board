@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}LINE監視 - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="line-monitor">
+    <div class="page-header">
+        <h1>LINEグループ監視</h1>
+        <p>アルバイトからの出勤可能日メッセージを確認</p>
+        <a href="{{ url_for('manager_dashboard') }}" class="btn btn-secondary">戻る</a>
+    </div>
+
+    <div class="notice-box">
+        <h3>LINE連携について</h3>
+        <p>LINEグループチャットの監視機能は、LINE Messaging APIの利用が必要です。</p>
+        <p>現在は手動でメッセージを確認・紐付けることができます。</p>
+        <p>LINE Botを作成してWebhookを設定すると、自動でメッセージを取り込めるようになります。</p>
+    </div>
+
+    <div class="section">
+        <h2>メッセージ一覧</h2>
+        <div class="message-list">
+            {% for msg in messages %}
+            <div class="message-card {% if msg.is_processed %}processed{% endif %}">
+                <div class="message-header">
+                    <span class="message-time">{{ msg.received_at.strftime('%m/%d %H:%M') }}</span>
+                    {% if msg.is_processed %}
+                        <span class="badge badge-success">処理済み</span>
+                    {% else %}
+                        <span class="badge badge-warning">未処理</span>
+                    {% endif %}
+                </div>
+                <div class="message-body">{{ msg.raw_message }}</div>
+                {% if not msg.is_processed %}
+                <div class="message-actions">
+                    <select class="employee-select" data-msg-id="{{ msg.id }}">
+                        <option value="">従業員を選択</option>
+                        {% for emp in employees %}
+                        <option value="{{ emp.id }}">{{ emp.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-primary" onclick="processMessage({{ msg.id }})">紐付ける</button>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            {% if not messages %}
+            <div class="empty-state">
+                <p>メッセージはまだありません</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function processMessage(msgId) {
+    const select = document.querySelector(`.employee-select[data-msg-id="${msgId}"]`);
+    const empId = select.value;
+    if (!empId) {
+        alert('従業員を選択してください');
+        return;
+    }
+
+    fetch('/manager/line/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            message_id: msgId,
+            employee_id: parseInt(empId)
+        })
+    }).then(() => {
+        location.reload();
+    });
+}
+</script>
+{% endblock %}

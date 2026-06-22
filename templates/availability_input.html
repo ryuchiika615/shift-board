@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}出勤可能日入力 - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="availability-page">
+    <div class="page-header">
+        <h1>{{ period.year }}年{{ period.month }}月 {% if period.half == 1 %}前半{% else %}後半{% endif %}</h1>
+        <p>出勤可能な日を選択してください</p>
+        <a href="{{ url_for('staff_view') }}" class="btn btn-secondary">戻る</a>
+    </div>
+
+    <div class="availability-grid">
+        {% for d in dates %}
+        {% set avail = availabilities.get(d) %}
+        {% set shift = shifts.get(d) %}
+        <div class="availability-card {% if avail and avail.is_available %}available{% elif avail %}unavailable{% endif %}"
+             data-date="{{ d.isoformat() }}"
+             data-period-id="{{ period.id }}"
+             onclick="toggleAvailability(this)">
+            <div class="card-date">
+                <span class="date-num">{{ d.day }}</span>
+                <span class="date-weekday {% if d.weekday() >= 5 %}weekend{% endif %}">{{ get_day_name(d) }}</span>
+            </div>
+            <div class="card-status">
+                {% if shift %}
+                    <div class="shift-assigned">
+                        <span class="shift-time">{{ shift.start_time }}-{{ shift.end_time }}</span>
+                        <span class="shift-type">{{ shift.shift_type }}</span>
+                    </div>
+                {% elif avail %}
+                    {% if avail.is_available %}
+                        <span class="status-available">○ 出勤可能</span>
+                        {% if avail.preferred_start %}
+                            <span class="preferred-time">{{ avail.preferred_start }}-{{ avail.preferred_end }}</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="status-unavailable">×</span>
+                    {% endif %}
+                {% else %}
+                    <span class="status-pending">未入力</span>
+                {% endif %}
+            </div>
+            <div class="card-input" style="display:none;">
+                <div class="input-row">
+                    <label>
+                        <input type="radio" name="avail_{{ d.isoformat() }}" value="true" {% if avail and avail.is_available %}checked{% endif %}> ○ 出勤可能
+                    </label>
+                    <label>
+                        <input type="radio" name="avail_{{ d.isoformat() }}" value="false" {% if avail and not avail.is_available %}checked{% endif %}> × 出勤不可
+                    </label>
+                </div>
+                <div class="time-inputs">
+                    <input type="time" class="pref-start" value="{{ avail.preferred_start if avail else '' }}" placeholder="希望開始">
+                    <span>〜</span>
+                    <input type="time" class="pref-end" value="{{ avail.preferred_end if avail else '' }}" placeholder="希望終了">
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+function toggleAvailability(card) {
+    const inputArea = card.querySelector('.card-input');
+    const isHidden = inputArea.style.display === 'none';
+
+    // 他のカードを閉じる
+    document.querySelectorAll('.availability-card').forEach(c => {
+        c.querySelector('.card-input').style.display = 'none';
+        c.classList.remove('editing');
+    });
+
+    if (isHidden) {
+        inputArea.style.display = 'block';
+        card.classList.add('editing');
+    }
+}
+
+document.querySelectorAll('.availability-card input[type="radio"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        const card = this.closest('.availability-card');
+        const date = card.dataset.date;
+        const periodId = card.dataset.periodId;
+        const isAvailable = this.value === 'true';
+        const startTime = card.querySelector('.pref-start').value;
+        const endTime = card.querySelector('.pref-end').value;
+
+        fetch('/staff/availability/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date: date,
+                period_id: parseInt(periodId),
+                is_available: isAvailable,
+                preferred_start: startTime || null,
+                preferred_end: endTime || null
+            })
+        }).then(() => {
+            // UI更新
+            card.classList.remove('available', 'unavailable');
+            if (isAvailable) {
+                card.classList.add('available');
+            } else {
+                card.classList.add('unavailable');
+            }
+            updateCardDisplay(card, isAvailable, startTime, endTime);
+        });
+    });
+});
+
+function updateCardDisplay(card, isAvailable, startTime, endTime) {
+    const statusEl = card.querySelector('.card-status');
+    if (isAvailable) {
+        let html = '<span class="status-available">○ 出勤可能</span>';
+        if (startTime && endTime) {
+            html += '<span class="preferred-time">' + startTime + '-' + endTime + '</span>';
+        }
+        statusEl.innerHTML = html;
+    } else {
+        statusEl.innerHTML = '<span class="status-unavailable">×</span>';
+    }
+}
+</script>
+{% endblock %}

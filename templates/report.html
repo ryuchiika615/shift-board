@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}部長用レポート - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="report-page">
+    <div class="report-header">
+        <div class="report-title">
+            <h1>松戸店　シフト表</h1>
+        </div>
+        <div class="report-actions no-print">
+            <button onclick="window.print()" class="btn btn-primary">印刷</button>
+            <a href="{{ url_for('shift_editor', period_id=period.id) }}" class="btn btn-secondary">編集に戻る</a>
+        </div>
+    </div>
+
+    <!-- メインテーブル -->
+    <div class="report-grid-container">
+        <table class="report-shift-grid" id="reportGrid">
+            <thead>
+                <tr>
+                    <th class="row-label"></th>
+                    {% for d in dates %}
+                    <th class="date-header {% if d.weekday() == 5 %}saturday{% elif d.weekday() == 6 %}sunday{% endif %}">
+                        <div>{{ d.day }}</div>
+                    </th>
+                    {% endfor %}
+                    <th class="total-header">前半合計</th>
+                </tr>
+                <tr>
+                    <th class="row-label"></th>
+                    {% for d in dates %}
+                    <th class="weekday-header {% if d.weekday() == 5 %}saturday{% elif d.weekday() == 6 %}sunday{% endif %}">
+                        {{ get_day_name(d) }}
+                    </th>
+                    {% endfor %}
+                    <th class="total-header"></th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- 売上予測(千円) -->
+                <tr class="sales-row">
+                    <td class="row-label sales-label">売上予測(千円)</td>
+                    {% for d in dates %}
+                    {% set sale = sales_data.get(d) %}
+                    <td class="data-cell sales-cell">{{ sale.sales_forecast // 1000 if sale and sale.sales_forecast else '' }}</td>
+                    {% endfor %}
+                    <td class="total-cell sales-total">{{ stats.total_forecast // 1000 if stats.total_forecast else 0 }}</td>
+                </tr>
+                <!-- 前年売上 -->
+                <tr class="sales-row">
+                    <td class="row-label sales-label">前年売上</td>
+                    {% for d in dates %}
+                    {% set sale = sales_data.get(d) %}
+                    <td class="data-cell sales-cell">{{ sale.last_year_sales // 1000 if sale and sale.last_year_sales else '' }}</td>
+                    {% endfor %}
+                    <td class="total-cell sales-total">{{ stats.total_last_year // 1000 if stats.total_last_year else 0 }}</td>
+                </tr>
+                <!-- 前年比 -->
+                <tr class="sales-row">
+                    <td class="row-label sales-label">前年比</td>
+                    {% for d in dates %}
+                    {% set sale = sales_data.get(d) %}
+                    <td class="data-cell sales-cell">
+                        {% if sale and sale.last_year_sales and sale.last_year_sales > 0 %}
+                            {% if sale.sales_forecast %}{{ "%.1f"|format((sale.sales_forecast / sale.last_year_sales) * 100) }}%{% endif %}
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="total-cell sales-total">
+                        {% if stats.total_last_year > 0 %}{{ "%.1f"|format((stats.total_forecast / stats.total_last_year) * 100) }}%{% endif %}
+                    </td>
+                </tr>
+                <!-- 前年ランチ売上 -->
+                <tr class="sales-row">
+                    <td class="row-label sales-label">前年ランチ売上</td>
+                    {% for d in dates %}
+                    {% set sale = sales_data.get(d) %}
+                    <td class="data-cell sales-cell">{{ sale.last_year_lunch // 1000 if sale and sale.last_year_lunch else '' }}</td>
+                    {% endfor %}
+                    <td class="total-cell sales-total">{{ stats.total_last_year_lunch // 1000 if stats.total_last_year_lunch else 0 }}</td>
+                </tr>
+                <!-- 前年ディナー売上 -->
+                <tr class="sales-row">
+                    <td class="row-label sales-label">前年ディナー売上</td>
+                    {% for d in dates %}
+                    {% set sale = sales_data.get(d) %}
+                    <td class="data-cell sales-cell">{{ sale.last_year_dinner // 1000 if sale and sale.last_year_dinner else '' }}</td>
+                    {% endfor %}
+                    <td class="total-cell sales-total">{{ stats.total_last_year_dinner // 1000 if stats.total_last_year_dinner else 0 }}</td>
+                </tr>
+
+                <!-- 空行 -->
+                <tr class="spacer-row"><td colspan="{{ dates|length + 2 }}"></td></tr>
+
+                <!-- 従業員シフト -->
+                {% for emp in employees %}
+                <tr class="employee-row {% if emp.role == 'manager' %}manager-row{% elif emp.role == 'fulltime' %}fulltime-row{% endif %}">
+                    <td class="row-label emp-name">{{ emp.name }}</td>
+                    {% for d in dates %}
+                    {% set shift = shifts_data[emp.id][d] %}
+                    <td class="shift-cell {% if d.weekday() == 5 %}saturday{% elif d.weekday() == 6 %}sunday{% endif %}">
+                        {% if shift and shift.start_time and shift.end_time %}
+                            {{ shift.start_time|int }} {{ shift.end_time|int }}
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="total-cell emp-total">{{ emp_totals.get(emp.id, 0) }}</td>
+                </tr>
+                {% endfor %}
+
+                <!-- 空行 -->
+                <tr class="spacer-row"><td colspan="{{ dates|length + 2 }}"></td></tr>
+
+                <!-- 統計セクション -->
+                <tr class="stats-row">
+                    <td class="row-label stats-label">社員労働時間</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('fulltime_hours', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">{{ labor.fulltime_hours }}</td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">社員休憩時間</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('fulltime_break', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">{{ labor.fulltime_break }}</td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">社員休憩無し時間</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('fulltime_no_break', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">{{ labor.fulltime_no_break }}</td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">変動労働時間</td>
+                    <td class="data-cell stats-cell"></td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell"></td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">{{ labor.total_ap_hours }}</td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">Ap時間計</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('ap_hours', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">{{ labor.total_ap_hours }}</td>
+                </tr>
+                <tr class="stats-row cost-row">
+                    <td class="row-label stats-label">変動費</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">¥{{ "{:,}".format(daily_stats.get(d.isoformat(), {}).get('labor_cost', 0)) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">¥{{ "{:,}".format(labor.total_labor_cost) }}</td>
+                </tr>
+                <tr class="stats-row sales-stat-row">
+                    <td class="row-label stats-label">人時売上</td>
+                    {% for d in dates %}
+                    {% set ds = daily_stats.get(d.isoformat(), {}) %}
+                    <td class="data-cell stats-cell">
+                        {% if ds.get('people_hour_sales', 0) > 0 %}¥{{ "{:,}".format(ds.people_hour_sales|int) }}{% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">¥{{ "{:,}".format(stats.people_hour_sales|int) }}</td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">Ap時間計（下）</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('ap_hours', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total">{{ labor.total_ap_hours }}</td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">ランチ人数</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('lunch_count', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total"></td>
+                </tr>
+                <tr class="stats-row">
+                    <td class="row-label stats-label">ディナー人数</td>
+                    {% for d in dates %}
+                    <td class="data-cell stats-cell">{{ daily_stats.get(d.isoformat(), {}).get('dinner_count', 0) }}</td>
+                    {% endfor %}
+                    <td class="total-cell stats-total"></td>
+                </tr>
+
+                <!-- 週別集計（右側） -->
+                <tr class="spacer-row"><td colspan="{{ dates|length + 2 }}"></td></tr>
+                <tr class="weekly-summary">
+                    <td class="row-label" rowspan="4">週</td>
+                    <td class="data-cell" colspan="{{ dates|length }}">1~7</td>
+                    <td class="total-cell">売上<br>¥{{ "{:,}".format(weekly_data.get('w1', {}).get('sales', 0)) }}</td>
+                    <td class="total-cell">労働時間<br>{{ weekly_data.get('w1', {}).get('hours', 0) }}</td>
+                    <td class="total-cell">人時売上<br>¥{{ "{:,}".format(weekly_data.get('w1', {}).get('phs', 0)|int) }}</td>
+                </tr>
+                <tr class="weekly-summary">
+                    <td class="data-cell" colspan="{{ dates|length }}">8~14</td>
+                    <td class="total-cell">¥{{ "{:,}".format(weekly_data.get('w2', {}).get('sales', 0)) }}</td>
+                    <td class="total-cell">{{ weekly_data.get('w2', {}).get('hours', 0) }}</td>
+                    <td class="total-cell">¥{{ "{:,}".format(weekly_data.get('w2', {}).get('phs', 0)|int) }}</td>
+                </tr>
+                <tr class="weekly-summary">
+                    <td class="data-cell" colspan="{{ dates|length }}">15~21</td>
+                    <td class="total-cell">¥{{ "{:,}".format(weekly_data.get('w3', {}).get('sales', 0)) }}</td>
+                    <td class="total-cell">{{ weekly_data.get('w3', {}).get('hours', 0) }}</td>
+                    <td class="total-cell">¥{{ "{:,}".format(weekly_data.get('w3', {}).get('phs', 0)|int) }}</td>
+                </tr>
+                <tr class="weekly-summary">
+                    <td class="data-cell" colspan="{{ dates|length }}">22~28</td>
+                    <td class="total-cell">¥{{ "{:,}".format(weekly_data.get('w4', {}).get('sales', 0)) }}</td>
+                    <td class="total-cell">{{ weekly_data.get('w4', {}).get('hours', 0) }}</td>
+                    <td class="total-cell">¥{{ "{:,}".format(weekly_data.get('w4', {}).get('phs', 0)|int) }}</td>
+                </tr>
+
+                <!-- Ap平均時給 -->
+                <tr class="stats-row wage-row">
+                    <td class="row-label stats-label" colspan="{{ dates|length + 1 }}">Ap平均時給</td>
+                    <td class="total-cell stats-total wage-value">¥{{ "{:,}".format(stats.ap_avg_wage) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

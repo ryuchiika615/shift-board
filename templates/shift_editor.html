@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}シフト編集 - 松戸店 シフト管理{% endblock %}
+{% block content %}
+<div class="shift-editor">
+    <div class="editor-header">
+        <h1>{{ period.year }}年{{ period.month }}月 {% if period.half == 1 %}前半{% else %}後半{% endif %} シフト編集</h1>
+        <div class="editor-actions">
+            <a href="{{ url_for('report_view', period_id=period.id) }}" class="btn btn-outline">部長用レポート</a>
+            <a href="{{ url_for('manager_dashboard') }}" class="btn btn-secondary">戻る</a>
+        </div>
+    </div>
+
+    <!-- 統計バー -->
+    <div class="stats-bar">
+        <div class="stat-item">
+            <span class="stat-label">売上予測:</span>
+            <span class="stat-value">¥{{ "{:,}".format(stats.total_forecast) }}</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">前年比:</span>
+            <span class="stat-value {% if stats.yoy_ratio >= 100 %}text-success{% else %}text-danger{% endif %}">{{ stats.yoy_ratio }}%</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">人時売上:</span>
+            <span class="stat-value">¥{{ "{:,}".format|int(stats.people_hour_sales) }}</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">労働時間:</span>
+            <span class="stat-value">{{ stats.total_hours }}h</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">Ap時間:</span>
+            <span class="stat-value">{{ stats.ap_hours }}h</span>
+        </div>
+    </div>
+
+    <!-- シフトグリッド -->
+    <div class="shift-grid-container">
+        <table class="shift-grid" id="shiftGrid">
+            <thead>
+                <tr>
+                    <th class="name-header">名前</th>
+                    {% for d in dates %}
+                    <th class="date-header {% if d.weekday() >= 5 %}weekend{% endif %} {% if d == today %}today{% endif %}">
+                        <div class="date-day">{{ d.day }}</div>
+                        <div class="date-weekday">{{ get_day_name(d) }}</div>
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for emp in employees %}
+                <tr class="employee-row" data-employee-id="{{ emp.id }}">
+                    <td class="name-cell">
+                        <div class="emp-name">{{ emp.name }}</div>
+                        <div class="emp-info">
+                            {% if emp.role == 'manager' %}店長{% elif emp.role == 'fulltime' %}社員{% else %}AP{% endif %}
+                            {% if emp.is_highschool %}<span class="badge badge-warning">高校生</span>{% endif %}
+                        </div>
+                    </td>
+                    {% for d in dates %}
+                    {% set cell_data = shifts_data[emp.id][d] %}
+                    <td class="shift-cell {% if d.weekday() >= 5 %}weekend{% endif %} {% if cell_data.shift %}has-shift{% endif %} {% if cell_data.availability and not cell_data.availability.is_available %}unavailable{% endif %}"
+                        data-employee-id="{{ emp.id }}"
+                        data-date="{{ d.isoformat() }}"
+                        data-period-id="{{ period.id }}"
+                        onclick="openShiftModal(this)">
+                        {% if cell_data.shift %}
+                            <div class="shift-time">{{ cell_data.shift.start_time }}-{{ cell_data.shift.end_time }}</div>
+                            <div class="shift-type">{{ cell_data.shift.shift_type }}</div>
+                            {% if cell_data.shift.area %}<div class="shift-area">{{ cell_data.shift.area }}</div>{% endif %}
+                        {% elif cell_data.availability %}
+                            <div class="avail-indicator {% if cell_data.availability.is_available %}available{% else %}unavailable{% endif %}">
+                                {% if cell_data.availability.is_available %}
+                                    ○
+                                {% else %}
+                                    ×
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- シフト入力モーダル -->
+<div id="shiftModal" class="modal">
+    <div class="modal-content modal-compact">
+        <div class="modal-header">
+            <h2 id="modalTitle">シフト入力</h2>
+            <button class="modal-close" onclick="closeShiftModal()">&times;</button>
+        </div>
+        <form id="shiftForm" onsubmit="saveShift(event)">
+            <input type="hidden" id="modalEmployeeId">
+            <input type="hidden" id="modalDate">
+            <input type="hidden" id="modalPeriodId">
+
+            <div class="form-group">
+                <label id="modalDateLabel">日付</label>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="modalStartTime">開始</label>
+                    <input type="time" id="modalStartTime" required>
+                </div>
+                <div class="form-group">
+                    <label for="modalEndTime">終了</label>
+                    <input type="time" id="modalEndTime" required>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="modalShiftType">シフト種別</label>
+                    <select id="modalShiftType">
+                        <option value="L">ランチ</option>
+                        <option value="D">ディナー</option>
+                        <option value="F">フル</option>
+                        <option value="B">裏麺</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="modalArea">配置</label>
+                    <select id="modalArea">
+                        <option value="">選択</option>
+                        <option value="フロア">フロア</option>
+                        <option value="レジ">レジ</option>
+                        <option value="調理">調理</option>
+                        <option value="裏麺">裏麺</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="modalBreak">休憩（分）</label>
+                <input type="number" id="modalBreak" value="60" min="0" max="120">
+            </div>
+
+            <div class="form-actions">
+                <button type="button" class="btn btn-danger" onclick="deleteShift()">削除</button>
+                <button type="button" class="btn btn-secondary" onclick="closeShiftModal()">キャンセル</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+let today = '{{ today.isoformat() }}';
+</script>
+<script src="{{ url_for('static', filename='js/shift_editor.js') }}"></script>
+{% endblock %}
