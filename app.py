@@ -23,24 +23,26 @@ if not database_url:
     else:
         database_url = f'sqlite:///{os.path.join(basedir, "shift.db")}'
 
-if database_url.startswith('postgres://'):
-    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+if 'sqlite' in database_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    import re
+    m = re.match(r'postgresql://([^:]+):([^@]+)@(.+)', database_url)
+    if m:
+        _user, _pw, _rest = m.groups()
+        _db_url = f'postgresql://{_user}@{_rest}?sslmode=require&connect_timeout=10'
+        app.config['SQLALCHEMY_DATABASE_URI'] = _db_url
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'connect_args': {
+                'password': _pw,
+            },
+            'pool_pre_ping': True,
+        }
+    else:
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 
-# Supabase: ホスト名をIPv4に解決し、パスワードをURLエンコードしてSSLMODEを追加
-import re as _re
-_pg_match = _re.match(r'postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', database_url)
-if _pg_match:
-    _user, _pw, _host, _port, _db = _pg_match.groups()
-    from urllib.parse import quote
-    try:
-        import socket as _socket
-        _ipv4 = _socket.getaddrinfo(_host, int(_port), _socket.AF_INET)[0][4][0]
-        _host = _ipv4
-    except Exception:
-        pass
-    database_url = f'postgresql://{_user}:{quote(_pw, safe="")}@{_host}:{_port}/{_db}?sslmode=require&connect_timeout=10'
-
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # LINE Bot設定（LINE Developer Consoleから取得）
