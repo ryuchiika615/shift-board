@@ -6,8 +6,10 @@ import hmac
 import base64
 import urllib.request
 from datetime import datetime, date, timedelta
+from urllib.parse import urlparse
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, abort
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.engine.url import URL
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -28,20 +30,20 @@ if 'sqlite' in database_url:
 else:
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
-    import re
-    m = re.match(r'postgresql://([^:]+):([^@]+)@(.+)', database_url)
-    if m:
-        _user, _pw, _rest = m.groups()
-        _db_url = f'postgresql://{_user}@{_rest}?sslmode=require&connect_timeout=10'
-        app.config['SQLALCHEMY_DATABASE_URI'] = _db_url
-        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-            'connect_args': {
-                'password': _pw,
-            },
-            'pool_pre_ping': True,
-        }
-    else:
-        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    parsed = urlparse(database_url)
+    safe_url = str(URL.create(
+        drivername='postgresql',
+        username=parsed.username or '',
+        password=parsed.password or '',
+        host=parsed.hostname or '',
+        port=parsed.port or 6543,
+        database=(parsed.path.lstrip('/') if parsed.path else 'postgres'),
+        query={'sslmode': 'require', 'connect_timeout': '10'}
+    ))
+    app.config['SQLALCHEMY_DATABASE_URI'] = safe_url
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+    }
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
