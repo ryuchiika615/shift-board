@@ -27,6 +27,14 @@ if not database_url:
 if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
+# Supabase PostgreSQL接続パラメータ（SSL + タイムアウト）
+if 'postgresql' in database_url:
+    sep = '&' if '?' in database_url else '?'
+    if 'sslmode' not in database_url:
+        database_url += sep + 'sslmode=require'
+    if 'connect_timeout' not in database_url:
+        database_url += '&connect_timeout=10'
+
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
