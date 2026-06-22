@@ -27,6 +27,19 @@ if not database_url:
 if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
+# パスワードの特殊文字をURLエンコード
+from urllib.parse import urlparse, urlunparse, quote
+try:
+    parsed = urlparse(database_url)
+    if parsed.password:
+        encoded_password = quote(parsed.password, safe='')
+        replaced = database_url.replace(
+            f':{parsed.password}@', f':{encoded_password}@', 1
+        )
+        database_url = replaced
+except Exception:
+    pass
+
 # Supabase PostgreSQL接続パラメータ（SSL + タイムアウト）
 if 'postgresql' in database_url:
     sep = '&' if '?' in database_url else '?'
