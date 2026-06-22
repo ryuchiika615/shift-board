@@ -689,11 +689,9 @@ def line_monitor():
     if session.get('user_role') != 'manager':
         return redirect(url_for('login'))
 
-    messages = LineMessage.query.order_by(LineMessage.received_at.desc()).limit(50).all()
-    employees = Employee.query.filter_by(is_active=True, role='parttime').all()
+    employees = Employee.query.filter_by(is_active=True).all()
 
     return render_template('line_monitor.html',
-                         messages=messages,
                          employees=employees)
 
 
@@ -966,32 +964,7 @@ def get_current_period():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """LINE Webhookエンドポイント - とにかく速く200を返す"""
-    body = request.get_data(as_text=True)
-    
-    # 署名検証をスキップ（エラー防止）
-    # 本番では有効化推奨
-    
-    try:
-        data = json.loads(body)
-        
-        for event in data.get('events', []):
-            event_type = event.get('type')
-            reply_token = event.get('replyToken')
-            
-            if event_type == 'join' and reply_token:
-                reply_to_line(reply_token, '松戸店シフト管理Botです！\n出勤可能日を送ってください。\n例：「1日 10-15」「1日○ 2日×」')
-            
-            elif event_type == 'follow' and reply_token:
-                profile = get_line_profile(event['source']['userId'])
-                name = profile.get('displayName', '')
-                reply_to_line(reply_token, f'{name}さん、こんにちは！\n出勤可能日を送ってください。')
-            
-            elif event_type == 'message' and event.get('message', {}).get('type') == 'text':
-                handle_line_message(event)
-    except Exception as e:
-        print(f'Webhook error: {e}')
-    
+    """LINE Webhook - 現在無効"""
     return 'OK'
 
 

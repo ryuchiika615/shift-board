@@ -16,7 +16,6 @@
             {% if session.get('user_role') == 'manager' %}
                 <a href="{{ url_for('manager_dashboard') }}" class="nav-link">ダッシュボード</a>
                 <a href="{{ url_for('manage_employees') }}" class="nav-link">従業員管理</a>
-                <a href="{{ url_for('line_monitor') }}" class="nav-link">LINE監視</a>
             {% elif session.get('user_id') %}
                 <a href="{{ url_for('staff_view') }}" class="nav-link">マイページ</a>
             {% endif %}
