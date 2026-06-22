@@ -23,28 +23,26 @@ if not database_url:
     else:
         database_url = f'sqlite:///{os.path.join(basedir, "shift.db")}'
 
-# Supabaseの接続文字列を修正（postgres:// → postgresql://）
-if database_url.startswith('postgres://'):
-    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+if 'sqlite' in database_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    # Supabase: URLから個別パラメータに分解（!などの特殊文字対策）
+    import re
+    m = re.match(r'postgres(?:ql)?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)', database_url)
+    if m:
+        user, password, host, port, dbname = m.groups()
+        app.config['SQLALCHEMY_DATABASE_URI'] = \
+            f'postgresql+psycopg2://{user}@{host}:{port}/{dbname}'
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+            'connect_args': {
+                'password': password,
+                'sslmode': 'require',
+                'connect_timeout': 10,
+            }
+        }
+    else:
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 
-# パスワードの特殊文字をURLエンコード（postgresql://user:pass@host 形式）
-from urllib.parse import quote
-import re
-url_match = re.match(r'(postgresql://[^:]+:)([^@]+)(@.*)', database_url)
-if url_match:
-    prefix, password, suffix = url_match.groups()
-    encoded_password = quote(password, safe='')
-    database_url = prefix + encoded_password + suffix
-
-# Supabase PostgreSQL接続パラメータ（SSL + タイムアウト）
-if 'postgresql' in database_url:
-    sep = '&' if '?' in database_url else '?'
-    if 'sslmode' not in database_url:
-        database_url += sep + 'sslmode=require'
-    if 'connect_timeout' not in database_url:
-        database_url += '&connect_timeout=10'
-
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # LINE Bot設定（LINE Developer Consoleから取得）
